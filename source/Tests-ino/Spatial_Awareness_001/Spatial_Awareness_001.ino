@@ -34,11 +34,11 @@ Move move(//def of the move obj
 const int enable34 = 9; // L293D pin 9 Tthe one on the 1st servo 
 
 //SPATIAL AWARENESS CODE 
-pos[2] = {0,0}
+int pos[2] = {0,0};
 
 //Pulse to mm variables
-int diameter = 60 //in mm
-int pulses = 1020 // 1020 in  Left robot, 1650 in Right robot
+int diameter = 60; //in mm
+int pulses = 1020; // 1020 in  Left robot, 1650 in Right robot
 
 void setup() {
   pinMode(enable34, OUTPUT);//enable rotor Output
@@ -47,37 +47,38 @@ void setup() {
   pixy.init();
   pixy.setLamp(255, 0); //Power of the Pixy's built in LED 
 
-  myservo.attach(10)
+  myservo.attach(10);
 
 }
 
 void loop() {
 
-long currentEncoderLeft = encoderLeft.getEncoderCount();
-long currentEncoderRight = encoderRight.getEncoderCount();
+  long currentEncoderLeft = encoderLeft.getEncoderCount();
+  long currentEncoderRight = encoderRight.getEncoderCount();
 
-double currentMmForward = move.pulsesToMM((currentEncoderLeft + currentEncoderRight) / 2, diameter, pulses)
+  double currentMmForward = move.pulsesToMM((currentEncoderLeft + currentEncoderRight) / 2, diameter, pulses);
 
 
-pixy.ccc.getBlocks();
-i = 1;
-if (pixy.ccc.numBlocks){
-  int x = pixy.ccc.blocks[i].m_x;
-  if (x < 140)
-  { 
-    move.simpleLeft();
-    Serial.print("MOVE RIGHT\n");
-    pixy.ccc.blocks[i].print();
+  pixy.ccc.getBlocks();
+  int i = 1;
+  if (pixy.ccc.numBlocks){
+    int x = pixy.ccc.blocks[i].m_x;
+    if (x < 140)
+    { 
+      move.simpleLeft();
+      Serial.print("MOVE RIGHT\n");
+      pixy.ccc.blocks[i].print();
 
-  } else if (x > 240){
-    move.simpleRight();
-    Serial.print("MOVE LEFT\n");
-    pixy.ccc.blocks[i].print();
+    } else if (x > 240){
+      move.simpleRight();
+      Serial.print("MOVE LEFT\n");
+      pixy.ccc.blocks[i].print();
 
-  } else if (x < 240 && x > 140 && currentMmForward < 200){
-    pixy.ccc.blocks[i].print();
-    move.simpleForward();
-  } else if (currentMmForward > 200){
-    move.stop();
+    } else if (x < 240 && x > 140 && currentMmForward < 200){
+      pixy.ccc.blocks[i].print();
+      move.simpleForward();
+    } else if (currentMmForward > 200){
+      move.stop();
+    }
   }
 }
