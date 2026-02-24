@@ -52,6 +52,7 @@ void setup() {
 }
 
 void loop() {
+  delay(500); //testing for stability 22/2
 
   long currentEncoderLeft = encoderLeft.getEncoderCount();
   long currentEncoderRight = encoderRight.getEncoderCount();
@@ -60,7 +61,7 @@ void loop() {
 
 
   pixy.ccc.getBlocks();
-  int i = 1;
+  int i = 0;
   if (pixy.ccc.numBlocks){
     int x = pixy.ccc.blocks[i].m_x;
     if (x < 140)
