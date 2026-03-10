@@ -7,7 +7,7 @@
 #include "I2Cdev.h"
 #include "MPU6050.h"
 #include "Wire.h"
-#include "C:\Users\samue\OneDrive\Documents\GitHub\singapore25\Codes\Movement\Encoder\Ecoder measured movement\lib\move\move.h"
+#include "move.h"
 #include <Pixy2.h>
 
 //move
@@ -15,12 +15,12 @@ AF_DCMotor motor1(1); // Motor 1 on the Adafruit Motor Shield
 AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
 AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
 AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
-  //LEFT
-  int pwmf[4] = {228, 231, 231, 228};
-  int pwms[4] = {200, 200, 200, 195};
-  // //RIGHT
-  // int pwmf[4] = {235, 240, 240, 234};
-  // int pwms[4] = {215, 200, 200, 200};
+//LEFT
+  // int pwmf[4] = {228, 231, 231, 228};
+  // int pwms[4] = {200, 200, 200, 195};
+//RIGHT
+  int pwmf[4] = {235, 240, 240, 234};
+  int pwms[4] = {215, 200, 200, 200};
   
 
 Encoders encoderLeft(A15, A14);	// Create an Encoder object name leftEncoder, using digitalpin 2 & 3
@@ -96,9 +96,6 @@ static int routine = 4;
 int state = 0;
 bool first = true;
 
-// int closed = 180;
-// int open = 0;
-
 int beta = 8; //degree error
 int alpha = 0;
 
@@ -119,18 +116,19 @@ enum side {
 }; 
 
 //conditional------------------------------------------------------------------------------------- aqui Samuel 
-// const long pulses = 1650; // Number of pulses for each movement step
-const long pulses = 1020; // Number of pulses for each movement step
-// side robotSide = RIGHT;
-side robotSide = LEFT;
+const long pulses = 1650; // Number of pulses for each movement step
+// const long pulses = 1020; // Number of pulses for each movement step
+side robotSide = RIGHT;
+// side robotSide = LEFT;
 int lenght = 0;
 
 //servo--------------------------------------------
-int closedGate = 170;
-int openGate = 55;
+// LEFT
+// int closedGate = 170;
+// int openGate = 55;
 //RIGHT
-// int closedGate = 96;
-// int openGate = 0;
+int closedGate = 96;
+int openGate = 0;
 
 // functions-----------------------------------------------------------------------------
 
@@ -144,6 +142,7 @@ bool inner(int mili){
   }else if (robotSide == LEFT){
     if(move.right(mm(mili)))return true;
   }
+  return false;
 }
 
 bool outer(int mili){
@@ -152,6 +151,7 @@ bool outer(int mili){
   }else if (robotSide == LEFT){
     if(move.left(mm(mili))) return true;
   }
+  return false;
 }
 
 int testI2C() {
@@ -219,10 +219,18 @@ int classifyLane(float x, float y, bool right) {
         return 1; // Lane 3
     }
 }
-void enableSlowDrivers(){pinMode(enable34, OUTPUT); digitalWrite(enable34, 50);}
-void enableDrivers(){digitalWrite(enable34, 150);   pinMode(enable34, OUTPUT);}
-void disableDrivers(){digitalWrite(enable34, 80);   pinMode(enable34, OUTPUT);}
-
+void enableSlowDrivers() {
+  pinMode(enable34, OUTPUT); 
+  analogWrite(enable34, 50); 
+}
+void enableDrivers() {
+  pinMode(enable34, OUTPUT);
+  analogWrite(enable34, 150);   
+}
+void disableDrivers() {
+  pinMode(enable34, OUTPUT);
+  analogWrite(enable34, 80);   
+}
 //----------------------------------------------------------------------------------------
 int filterGyro(MPU6050_Base sensor){
   sensor.getRotation(&gx, &gy, &gz);
@@ -236,22 +244,17 @@ int filterGyro(MPU6050_Base sensor){
   return ang_z;
 } 
 
-void onSwitchPress() {
-  backSwitchPressed = true;
-  resetGyroAngles();
-}
-
 void resetGyroAngles() {
   ang_x = ang_y = ang_z = 0;
   ang_x_prev = ang_y_prev = ang_z_prev = 0;
   tiempo_prev = millis(); 
 }
 
-// void waitForSwitchPress() {
-//   while (digitalRead(switchPin) == LOW) {
-//     // Do nothing — wait until switch is pressed
-//   }
-// }
+void onSwitchPress() {
+  backSwitchPressed = true;
+  resetGyroAngles();
+}
+
 
   void blink(){
         digitalWrite(LED, HIGH);
@@ -409,21 +412,23 @@ void loop() {//-----------------------------------------------------------------
   //
 
     // Last Routine Code ----------------------------------------------
-    static bool lastRoutine = false;
-    if (lastRoutine == false &&  (millis() > 105000 + startTime) && (routine != 7 || routine != 5)){
-      lastRoutine = true;
-      lane = INNER;
-      lenght -= 30;
-    }
-    static bool midRoutine = false;
-    if (midRoutine == false  &&  (millis() > 45000 + startTime) && (routine != 7 || routine != 5)){
-      midRoutine = true;
-      lane = INNER;
-      lenght -= 30;
-    } else if(midRoutine == true && (millis() > 62000 + startTime) && (millis() < 100000 + startTime)){
-      midRoutine = false;
-      lenght += 30;
-    }
+  static bool lastRoutine = false;
+  if (lastRoutine == false &&  (millis() > 105000 + startTime) && (routine != 7 && routine != 5)){
+    lastRoutine = true;
+    lane = INNER;
+    lenght -= 30;
+  }
+  static bool midRoutine = false;
+  static bool midRoutineDone = false;
+  if (midRoutine == false && midRoutineDone == false && (millis() > 40000 + startTime) ){ //&& (routine != 7 && routine != 5)
+    midRoutine = true;
+    lane = INNER;
+    lenght -= 30;
+  } else if(midRoutine == true && (millis() > 62000 + startTime) && (millis() < 100000 + startTime)){
+    midRoutine = false;
+    midRoutineDone = true;
+    lenght += 30;
+  }
   int devices = testI2C();
 
   if (devices > 0) {
@@ -449,19 +454,6 @@ void loop() {//-----------------------------------------------------------------
 
 
     
-
-    
-
-
-
-
-  //check if the robot is centered before acting---------------------------------
-  // if (ang_z >= alpha + beta && routine != 7) {
-  //   routine = 8;
-  // } else if (ang_z <= alpha - beta && routine != 7){
-  //   routine = 8;
-  // }
-
     // routine 0-3 = case 0-3 ball 
     // routine 4 Simple Lanes
     // routine 5 Diagonal Lane
@@ -472,7 +464,7 @@ void loop() {//-----------------------------------------------------------------
     // routine 10 debugging
 
 
-switch (routine) {
+switch (routine) {//---------------------------------------------------------------------------------------ROUTINES---------------------------------------------------------//
   case 0:
     switch(state){
       case 0:
@@ -604,10 +596,10 @@ switch (routine) {
         if(outer(200)) state++;
         break;
       case 0:
-        if(move.backward(mm(280))) state++;
+        if(move.backward(mm(280))) state = 1;
         break;
       case 1:
-        if(move.stopForMillis(mili)) state++;
+        if(move.stopForMillis(mili)) state = 2;
         break;
       case 2:
           enableDrivers();        
@@ -665,13 +657,13 @@ switch (routine) {
           } else if (lane == MIDDLE) {
             lane = INNER;
           } else if (lane == INNER) {
-            return(1);
+            return;
           }
         }
         routine = 6;
 
         if (lastRoutine == true || midRoutine == true){
-          routine  = 7;
+          routine  = 9;
           state = 0;
         }
       break;
@@ -812,7 +804,7 @@ switch (routine) {
               if (mejorFranja == 0){
                 if (robotSide == RIGHT){
                   lane = INNER;
-                } else {lane == OUTER;}
+                } else {lane = OUTER;}
               } else if(mejorFranja == 2){
                 if(robotSide == RIGHT){
                   lane = OUTER;
@@ -987,6 +979,8 @@ switch (routine) {
         routine = 4;
         state = 0;
         lane = OUTER;
+        break;
+        
     }
   break;
   case 8:
@@ -1001,10 +995,11 @@ switch (routine) {
     }
 
   case 9:
-    // if (lastRoutine == false and millis() > 62000){
-    //   routine = 6;
-    //   state = 0;
-    // }
+    if (lastRoutine == false and millis() > 62000){
+      routine = 6;
+      state = 0;
+      break;
+    }
     move.moveBeginStrafe();
     pixy.ccc.getBlocks();
     if (robotSide == LEFT){
@@ -1067,26 +1062,28 @@ switch (routine) {
       routine = 10;
       state = 0;
     }
-    if (lastRoutine == false and millis() > 62000){
-      routine = 6;
-      state = 0;
-    }   
+    // if (lastRoutine == false and millis() > 62000){
+    //   routine = 6;
+    //   state = 0;
+    // }   
     break;
 
   case 10:
     switch(state){
       case 0:
-        if(move.backward(mm(15))) state++;
+        if(move.backward(mm(50))) state = 1;
         break;
       case 1:
         if(move.left(mm(500))) state++;
         break;
+      case 2:
+        if (lastRoutine == false and millis() > 62000){
+          routine = 6;
+          state = 0;
+        }  
     }
     break;
   
 } 
 
-
-
-  delay(5); //delay for stability introduced july 😝
 }
