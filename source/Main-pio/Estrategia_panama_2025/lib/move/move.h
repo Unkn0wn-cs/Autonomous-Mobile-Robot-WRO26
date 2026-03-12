@@ -13,7 +13,7 @@
 
 class Move {
   public:
-    unsigned long moveTimeoutMs = 3000; 
+    unsigned long moveTimeoutMs = 4000; 
 
     // PWM values for forward/backward
     int pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4;
@@ -92,12 +92,27 @@ class Move {
     }
 
     int forwardp(long pulses, bool position) {
-      int d = 8;
+      int d = 10;
       if (position == false){
         begin(pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);  
       }else{
         begin(pwmFwd1 - d, pwmFwd2, pwmFwd3 ,pwmFwd4 - d);  
       }
+      
+      if (!moving) {
+        startMove();
+        moveStartTime = millis();
+      }
+      setMotors(FORWARD, FORWARD, FORWARD, FORWARD);
+      if (checkDoneWithTimeout(pulses)){
+        return 1;
+      } else if (checkDoneWithTimeout(pulses / 2, true)){
+        return 2;
+      } else {return 0;};
+    }
+
+    int forwardRegulated(long pulses) {
+      begin(pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);  
       
       if (!moving) {
         startMove();

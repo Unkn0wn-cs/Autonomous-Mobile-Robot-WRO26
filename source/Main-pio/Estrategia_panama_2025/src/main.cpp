@@ -221,15 +221,15 @@ int classifyLane(float x, float y, bool right) {
 }
 void enableSlowDrivers() {
   pinMode(enable34, OUTPUT); 
-  analogWrite(enable34, 50); 
+  analogWrite(enable34, 140); 
 }
 void enableDrivers() {
   pinMode(enable34, OUTPUT);
-  analogWrite(enable34, 150);   
+  analogWrite(enable34, 254);   
 }
 void disableDrivers() {
   pinMode(enable34, OUTPUT);
-  analogWrite(enable34, 80);   
+  analogWrite(enable34, 0);   
 }
 //----------------------------------------------------------------------------------------
 int filterGyro(MPU6050_Base sensor){
@@ -413,7 +413,7 @@ void loop() {//-----------------------------------------------------------------
 
     // Last Routine Code ----------------------------------------------
   static bool lastRoutine = false;
-  if (lastRoutine == false &&  (millis() > 105000 + startTime) && (routine != 7 && routine != 5)){
+  if (lastRoutine == false &&  (millis() > 100000 + startTime) ){ //&& (routine != 7 && routine != 5)
     lastRoutine = true;
     lane = INNER;
     lenght -= 30;
@@ -424,7 +424,7 @@ void loop() {//-----------------------------------------------------------------
     midRoutine = true;
     lane = INNER;
     lenght -= 30;
-  } else if(midRoutine == true && (millis() > 62000 + startTime) && (millis() < 100000 + startTime)){
+  } else if(midRoutine == true && (millis() > 61000 + startTime) && (millis() < 100000 + startTime)){
     midRoutine = false;
     midRoutineDone = true;
     lenght += 30;
@@ -595,27 +595,38 @@ switch (routine) {//------------------------------------------------------------
       case -1:
         if(outer(200)) state++;
         break;
-      case 0:
+      case 0:          
+        enableDrivers();        
         if(move.backward(mm(280))) state = 1;
         break;
       case 1:
         if(move.stopForMillis(mili)) state = 2;
         break;
       case 2:
-          enableDrivers();        
           if (lane == MIDDLE){
-            if(move.forward(mm(lenght + 50))) state++;  
+            int test = move.forwardRegulated(mm(lenght + 50));
+            switch(test){
+              case 1:
+                state++;
+                break;
+              case 2:
+                enableSlowDrivers();
+                break;
+           }
+            // if(move.forward(mm(lenght + 50))) state++;  
           } else if(lane == OUTER){
               if (robotSide == RIGHT){
                 int test = move.forwardp(mm(lenght + 50), true);
-                if (test == 2){enableSlowDrivers();}
                 switch(test){
                   case 1:
                     state++;
                     break;
+                  case 2:
+                    enableSlowDrivers();
+                    break;
                 }
 
-                // if(move.forwardp(mm(lenght + 50), true) == 1) state++;  
+                // if(move.forwardp(mm(lenght + 50), true) == 1) state++;  //no middle signal
               }else{
                 int test = move.forwardp(mm(lenght + 50), false);
                 if (test == 2){enableSlowDrivers();}
@@ -636,6 +647,7 @@ switch (routine) {//------------------------------------------------------------
         if(move.stopForMillis(mili)) state++;
         break;
       case 5:
+        enableDrivers();
 
         if (lane == OUTER){
           state = -1;
@@ -689,6 +701,7 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 5:
         state++;
+        enableSlowDrivers();
         break;
       case 6:
         if (robotSide == RIGHT){
@@ -995,7 +1008,7 @@ switch (routine) {//------------------------------------------------------------
     }
 
   case 9:
-    if (lastRoutine == false and millis() > 62000){
+    if (lastRoutine == false and millis() > 61000){
       routine = 6;
       state = 0;
       break;
