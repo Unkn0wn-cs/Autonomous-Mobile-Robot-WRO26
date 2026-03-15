@@ -16,11 +16,11 @@ AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
 AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
 AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
 //LEFT
-  // int pwmf[4] = {228, 231, 231, 228};
-  // int pwms[4] = {200, 200, 200, 195};
+  int pwmf[4] = {228, 231, 231, 228};
+  int pwms[4] = {200, 200, 200, 195};
 //RIGHT
-  int pwmf[4] = {235, 240, 240, 234};
-  int pwms[4] = {215, 200, 200, 200};
+  // int pwmf[4] = {235, 240, 240, 234};
+  // int pwms[4] = {215, 200, 200, 200};
   
 
 Encoders encoderLeft(A15, A14);	// Create an Encoder object name leftEncoder, using digitalpin 2 & 3
@@ -116,19 +116,19 @@ enum side {
 }; 
 
 //conditional------------------------------------------------------------------------------------- aqui Samuel 
-const long pulses = 1650; // Number of pulses for each movement step
-// const long pulses = 1020; // Number of pulses for each movement step
-side robotSide = RIGHT;
-// side robotSide = LEFT;
+// const long pulses = 1650; // Number of pulses for each movement step
+const long pulses = 1020; // Number of pulses for each movement step
+// side robotSide = RIGHT;
+side robotSide = LEFT;
 int lenght = 0;
 
 //servo--------------------------------------------
 // LEFT
-// int closedGate = 170;
-// int openGate = 55;
+int closedGate = 170;
+int openGate = 55;
 //RIGHT
-int closedGate = 96;
-int openGate = 0;
+// int closedGate = 96;
+// int openGate = 0;
 
 // functions-----------------------------------------------------------------------------
 
@@ -593,7 +593,37 @@ switch (routine) {//------------------------------------------------------------
   case 4:
     switch(state){
       case -1:
-        if(outer(200)) state++;
+        disableDrivers();
+        if (robotSide == RIGHT){
+          if(move.rotate(mm(166), false)) state--;
+        }else{
+          if(move.rotate(mm(166), true)) state--; 
+        }
+        break;
+      case -2:
+        if(outer(mm(20))) state--;
+        break;
+      case -3:
+        if (robotSide == RIGHT){
+          if(move.forwardp(mm(400), true)) state--;
+        }else{
+          if(move.forwardp(mm(400), false)) state--;
+        }
+        break;
+      case -4:
+        enableDrivers();
+        if(move.stopForMillis(mili)) state--;
+        break;
+      case -5:
+        disableDrivers();
+        if (robotSide == RIGHT){
+          if(move.rotate(mm(166), true)) state--;
+        }else{
+          if(move.rotate(mm(166), false)) state--;
+        }
+        break;
+      case -6:
+        if(outer(mm(20))) state = 0;
         break;
       case 0:          
         enableDrivers();        
@@ -855,15 +885,13 @@ switch (routine) {//------------------------------------------------------------
         }
 
         if (lastRoutine == true){
-          routine = 5;
-          state = 0;
+          routine = 4;
+          state = -1;
         } else if(midRoutine == true){
-          routine = 7;
-          state = 0;
+          routine = 4;
+          state = -1;
         }
-      break;
-
-        
+      break;        
     }
   break;
   case 7:
