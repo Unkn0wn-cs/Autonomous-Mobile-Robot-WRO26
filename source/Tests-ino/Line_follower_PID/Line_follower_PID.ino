@@ -30,10 +30,8 @@ bool WireWriteByte(uint8_t val) {
     Wire.beginTransmission(LINE_FOLLOWER_I2C_ADDR);
     Wire.write(val);
     if(Wire.endTransmission() != 0) {
-        // Serial.println("false"); // Commented out to prevent loop lag
         return false;
     }
-    // Serial.println("true"); // Commented out to prevent loop lag
     return true;
 }
 

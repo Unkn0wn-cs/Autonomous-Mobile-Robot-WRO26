@@ -16,11 +16,11 @@ AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
 AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
 AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
 //LEFT
-  int pwmf[4] = {228, 231, 231, 228};
-  int pwms[4] = {200, 200, 200, 195};
+  // int pwmf[4] = {228, 231, 231, 228};
+  // int pwms[4] = {200, 200, 200, 195};
 //RIGHT
-  // int pwmf[4] = {235, 240, 240, 234};
-  // int pwms[4] = {215, 200, 200, 200};
+  int pwmf[4] = {230, 250, 250, 230};
+  int pwms[4] = {215, 200, 200, 200};
   
 
 Encoders encoderLeft(A15, A14);	// Create an Encoder object name leftEncoder, using digitalpin 2 & 3
@@ -116,19 +116,19 @@ enum side {
 }; 
 
 //conditional------------------------------------------------------------------------------------- aqui Samuel 
-// const long pulses = 1650; // Number of pulses for each movement step
-const long pulses = 1020; // Number of pulses for each movement step
-// side robotSide = RIGHT;
-side robotSide = LEFT;
+const long pulses = 1650; // Number of pulses for each movement step
+// const long pulses = 1020; // Number of pulses for each movement step
+side robotSide = RIGHT;
+// side robotSide = LEFT;
 int lenght = 0;
 
 //servo--------------------------------------------
 // LEFT
-int closedGate = 170;
-int openGate = 55;
+// int closedGate = 170;
+// int openGate = 55;
 //RIGHT
-// int closedGate = 96;
-// int openGate = 0;
+int closedGate = 96;
+int openGate = 0;
 
 // functions-----------------------------------------------------------------------------
 
@@ -221,7 +221,7 @@ int classifyLane(float x, float y, bool right) {
 }
 void enableSlowDrivers() {
   pinMode(enable34, OUTPUT); 
-  analogWrite(enable34, 140); 
+  analogWrite(enable34, 180); 
 }
 void enableDrivers() {
   pinMode(enable34, OUTPUT);
@@ -413,16 +413,16 @@ void loop() {//-----------------------------------------------------------------
 
     // Last Routine Code ----------------------------------------------
   static bool lastRoutine = false;
-  if (lastRoutine == false &&  (millis() > 100000 + startTime) ){ //&& (routine != 7 && routine != 5)
+  if (lastRoutine == false &&  (millis() > 105000 + startTime) ){ //&& (routine != 7 && routine != 5)
     lastRoutine = true;
-    lane = INNER;
+    lane = OUTER;
     lenght -= 30;
   }
   static bool midRoutine = false;
   static bool midRoutineDone = false;
-  if (midRoutine == false && midRoutineDone == false && (millis() > 40000 + startTime) ){ //&& (routine != 7 && routine != 5)
+  if (midRoutine == false && midRoutineDone == false && (millis() > 45000 + startTime) ){ //&& (routine != 7 && routine != 5)
     midRoutine = true;
-    lane = INNER;
+    lane = OUTER;
     lenght -= 30;
   } else if(midRoutine == true && (millis() > 61000 + startTime) && (millis() < 100000 + startTime)){
     midRoutine = false;
@@ -592,7 +592,7 @@ switch (routine) {//------------------------------------------------------------
   ////-------------------------------LOOOP-----------------------------------------------------------////
   case 4:
     switch(state){
-      case -1:
+      case -1:                //OUTER LANE
         disableDrivers();
         if (robotSide == RIGHT){
           if(move.rotate(mm(166), false)) state--;
@@ -601,7 +601,7 @@ switch (routine) {//------------------------------------------------------------
         }
         break;
       case -2:
-        if(outer(mm(20))) state--;
+        if(outer(20)) state--;
         break;
       case -3:
         if (robotSide == RIGHT){
@@ -623,17 +623,17 @@ switch (routine) {//------------------------------------------------------------
         }
         break;
       case -6:
-        if(outer(mm(20))) state = 0;
+        if(outer(30)) state = 0;
         break;
       case 0:          
-        enableDrivers();        
+        enableDrivers();            //MIDDLE LANE
         if(move.backward(mm(280))) state = 1;
         break;
       case 1:
         if(move.stopForMillis(mili)) state = 2;
         break;
       case 2:
-          if (lane == MIDDLE){
+          if (lane == MIDDLE || lane == INNER){
             int test = move.forwardRegulated(mm(lenght + 50));
             switch(test){
               case 1:
