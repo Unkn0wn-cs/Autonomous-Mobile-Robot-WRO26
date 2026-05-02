@@ -15,10 +15,10 @@ AF_DCMotor motor1(1); // Motor 1 on the Adafruit Motor Shield
 AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
 AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
 AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
-//LEFT
-  // int pwmf[4] = {228, 231, 231, 228};
-  // int pwms[4] = {200, 200, 200, 195};
-//RIGHT
+//LEFT - WALL
+  // int pwmf[4] = {220, 234, 239, 220};
+  // int pwms[4] = {200, 200, 210, 200};
+//RIGHT - RAMP
   int pwmf[4] = {230, 250, 250, 230};
   int pwms[4] = {215, 200, 200, 200};
   
@@ -117,8 +117,8 @@ enum side {
 
 //conditional------------------------------------------------------------------------------------- aqui Samuel 
 const long pulses = 1650; // Number of pulses for each movement step
-// const long pulses = 1020; // Number of pulses for each movement step
 side robotSide = RIGHT;
+// const long pulses = 1020; // Number of pulses for each movement step
 // side robotSide = LEFT;
 int lenght = 0;
 
@@ -221,11 +221,11 @@ int classifyLane(float x, float y, bool right) {
 }
 void enableSlowDrivers() {
   pinMode(enable34, OUTPUT); 
-  analogWrite(enable34, 180); 
+  analogWrite(enable34, 160); 
 }
 void enableDrivers() {
   pinMode(enable34, OUTPUT);
-  analogWrite(enable34, 254);   
+  analogWrite(enable34, 255);   
 }
 void disableDrivers() {
   pinMode(enable34, OUTPUT);
@@ -998,9 +998,9 @@ switch (routine) {//------------------------------------------------------------
       case 16:
         enableDrivers();
         if(robotSide == RIGHT){
-          if(move.rotate(mm(50), true)) state++;
+          if(move.rotate(mm(40), true)) state++;
         } else {
-          if(move.rotate(mm(50), false)) state++;
+          if(move.rotate(mm(40), false)) state++;
         }
         break;
       case 17:
