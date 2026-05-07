@@ -106,7 +106,7 @@ class Move {
       setMotors(FORWARD, FORWARD, FORWARD, FORWARD);
       if (checkDoneWithTimeout(pulses)){
         return 1;
-      } else if (checkDoneWithTimeout(pulses / 2, true)){
+      } else if (checkDoneWithTimeout(((pulses / 22)*14), true)){
         return 2;
       } else {return 0;};
     }
@@ -121,7 +121,7 @@ class Move {
       setMotors(FORWARD, FORWARD, FORWARD, FORWARD);
       if (checkDoneWithTimeout(pulses)){
         return 1;
-      } else if (checkDoneWithTimeout(pulses / 2, true)){
+      } else if (checkDoneWithTimeout(((pulses / 22)*14), true)){
         return 2;
       } else {return 0;};
     }

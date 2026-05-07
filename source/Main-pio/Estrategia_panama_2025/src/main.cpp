@@ -221,11 +221,11 @@ int classifyLane(float x, float y, bool right) {
 }
 void enableSlowDrivers() {
   pinMode(enable34, OUTPUT); 
-  analogWrite(enable34, 160); 
+  analogWrite(enable34, 90); 
 }
 void enableDrivers() {
   pinMode(enable34, OUTPUT);
-  analogWrite(enable34, 255);   
+  analogWrite(enable34, 254);   
 }
 void disableDrivers() {
   pinMode(enable34, OUTPUT);
@@ -691,9 +691,7 @@ switch (routine) {//------------------------------------------------------------
           }
         } else if (robotSide == RIGHT && first == true){
           lane = OUTER;
-          first = false;
-        }else if (robotSide == LEFT){
-          first = false;
+        }else if (robotSide == LEFT){             
           if (lane == OUTER){
             lane = MIDDLE;
           } else if (lane == MIDDLE) {
@@ -701,6 +699,7 @@ switch (routine) {//------------------------------------------------------------
           } else if (lane == INNER) {
             return;
           }
+          first = false;
         }
         routine = 6;
 
@@ -884,6 +883,12 @@ switch (routine) {//------------------------------------------------------------
             state = -1;
         }
 
+        if(lane == OUTER && robotSide == RIGHT){//----------------------------------------------------------------------------------------------------------
+          routine = 4;
+          state = 0;
+          first = false;
+        }
+
         if (lastRoutine == true){
           routine = 4;
           state = -1;
@@ -998,9 +1003,9 @@ switch (routine) {//------------------------------------------------------------
       case 16:
         enableDrivers();
         if(robotSide == RIGHT){
-          if(move.rotate(mm(40), true)) state++;
+          if(move.rotate(mm(30), true)) state++;
         } else {
-          if(move.rotate(mm(40), false)) state++;
+          if(move.rotate(mm(30), false)) state++;
         }
         break;
       case 17:
@@ -1008,9 +1013,9 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 18:
         if(robotSide == LEFT){
-          if(move.rotate(mm(25), true)) state++;
+          if(move.rotate(mm(20), true)) state++;
         } else {
-          if(move.rotate(mm(25), false)) state++;
+          if(move.rotate(mm(20), false)) state++;
         }
         break; 
       case 19:
