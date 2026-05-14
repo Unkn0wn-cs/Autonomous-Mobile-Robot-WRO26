@@ -16,11 +16,12 @@ AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
 AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
 AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
 //LEFT - WALL
-  // int pwmf[4] = {220, 234, 239, 220};
-  // int pwms[4] = {200, 200, 210, 200};
+  int pwmf[4] = {220, 230, 239, 220};
+  int pwms[4] = {200, 200, 210, 200};
+
 //RIGHT - RAMP
-  int pwmf[4] = {230, 250, 250, 230};
-  int pwms[4] = {215, 200, 200, 200};
+  // int pwmf[4] = {230, 250, 250, 230};
+  // int pwms[4] = {215, 200, 200, 200};
   
 
 Encoders encoderLeft(A15, A14);	// Create an Encoder object name leftEncoder, using digitalpin 2 & 3
@@ -116,19 +117,19 @@ enum side {
 }; 
 
 //conditional------------------------------------------------------------------------------------- aqui Samuel 
-const long pulses = 1650; // Number of pulses for each movement step
-side robotSide = RIGHT;
-// const long pulses = 1020; // Number of pulses for each movement step
-// side robotSide = LEFT;
+// const long pulses = 1650; // Number of pulses for each movement step
+// side robotSide = RIGHT;
+const long pulses = 1020; // Number of pulses for each movement step
+side robotSide = LEFT;
 int lenght = 0;
 
 //servo--------------------------------------------
 // LEFT
-// int closedGate = 170;
-// int openGate = 55;
+int closedGate = 170;
+int openGate = 55;
 //RIGHT
-int closedGate = 96;
-int openGate = 0;
+// int closedGate = 96;
+// int openGate = 0;
 
 // functions-----------------------------------------------------------------------------
 
@@ -601,7 +602,7 @@ switch (routine) {//------------------------------------------------------------
         }
         break;
       case -2:
-        if(outer(20)) state--;
+        if(outer(mm(20))) state--;
         break;
       case -3:
         if (robotSide == RIGHT){
@@ -699,7 +700,6 @@ switch (routine) {//------------------------------------------------------------
           } else if (lane == INNER) {
             return;
           }
-          first = false;
         }
         routine = 6;
 
@@ -842,7 +842,7 @@ switch (routine) {//------------------------------------------------------------
               }
             }
 
-            if (connections < 4){
+            if (connections < 2){
               if (mejorFranja == 0){
                 if (robotSide == RIGHT){
                   lane = INNER;
@@ -883,16 +883,23 @@ switch (routine) {//------------------------------------------------------------
             state = -1;
         }
 
-        if(lane == OUTER && robotSide == RIGHT){//----------------------------------------------------------------------------------------------------------
+        if(lane == OUTER && robotSide == RIGHT && first == true){//----------------------------------------------------------------------------------------------------------
           routine = 4;
           state = 0;
           first = false;
         }
 
+        if (robotSide == LEFT && first == true){
+          routine = 5;
+          state = 0;
+          first = false;
+        }
+
+
         if (lastRoutine == true){
           routine = 4;
           state = -1;
-        } else if(midRoutine == true){
+        } else if(midRoutine == true && midRoutineDone == false){
           routine = 4;
           state = -1;
         }
