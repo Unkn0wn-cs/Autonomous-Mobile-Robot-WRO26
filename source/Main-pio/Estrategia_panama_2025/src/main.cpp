@@ -16,12 +16,12 @@ AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
 AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
 AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
 //LEFT - WALL
-  int pwmf[4] = {220, 230, 239, 220};
-  int pwms[4] = {200, 200, 210, 200};
+  // int pwmf[4] = {240, 245, 245, 240};
+  // int pwms[4] = {220, 220, 225, 220};
 
 //RIGHT - RAMP
-  // int pwmf[4] = {230, 250, 250, 230};
-  // int pwms[4] = {215, 200, 200, 200};
+  int pwmf[4] = {230, 243, 243, 230};
+  int pwms[4] = {200, 200, 200, 200};
   
 
 Encoders encoderLeft(A15, A14);	// Create an Encoder object name leftEncoder, using digitalpin 2 & 3
@@ -117,19 +117,21 @@ enum side {
 }; 
 
 //conditional------------------------------------------------------------------------------------- aqui Samuel 
-// const long pulses = 1650; // Number of pulses for each movement step
-// side robotSide = RIGHT;
-const long pulses = 1020; // Number of pulses for each movement step
-side robotSide = LEFT;
+const long pulses = 1650; // Number of pulses for each movement step
+side robotSide = RIGHT;
+int slowRotorSpeed = 180; 
+// const long pulses = 1020; // Number of pulses for each movement step
+// side robotSide = LEFT;
+// int slowRotorSpeed = 90; 
 int lenght = 0;
 
 //servo--------------------------------------------
 // LEFT
-int closedGate = 170;
-int openGate = 55;
+// int closedGate = 170;
+// int openGate = 55;
 //RIGHT
-// int closedGate = 96;
-// int openGate = 0;
+int closedGate = 96;
+int openGate = 0;
 
 // functions-----------------------------------------------------------------------------
 
@@ -222,7 +224,7 @@ int classifyLane(float x, float y, bool right) {
 }
 void enableSlowDrivers() {
   pinMode(enable34, OUTPUT); 
-  analogWrite(enable34, 90); 
+  analogWrite(enable34, slowRotorSpeed); 
 }
 void enableDrivers() {
   pinMode(enable34, OUTPUT);
@@ -273,7 +275,7 @@ void setup() { //---------------------------------------------------------------
 
 
   if(robotSide == RIGHT){
-    lenght = 680;
+    lenght = 640;
   }else{
     lenght = 1100;
   } 
@@ -423,7 +425,11 @@ void loop() {//-----------------------------------------------------------------
   static bool midRoutineDone = false;
   if (midRoutine == false && midRoutineDone == false && (millis() > 45000 + startTime) ){ //&& (routine != 7 && routine != 5)
     midRoutine = true;
-    lane = OUTER;
+    if (routine != 4 && lane != OUTER){
+      lane = OUTER;
+    } else {
+      lane = MIDDLE;
+    }
     lenght -= 30;
   } else if(midRoutine == true && (millis() > 61000 + startTime) && (millis() < 100000 + startTime)){
     midRoutine = false;
@@ -500,7 +506,7 @@ switch (routine) {//------------------------------------------------------------
   case 1:
     switch(state){
       case 0:
-        if (move.right(mm(180))) state++;
+        if (move.right(mm(200))) state++;
         break;
       case 1:
         if(move.backward(mm(100))) state++;
@@ -559,7 +565,7 @@ switch (routine) {//------------------------------------------------------------
   case 3:
     switch(state){
       case 0:
-        if(move.right(mm(180))) state++;
+        if(move.right(mm(200))) state++;
         break;
       case 1:
         if(move.backward(mm(100))) state++;
@@ -756,7 +762,7 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 10:
         if (robotSide == LEFT){
-          if(outer(50)) state++;
+          if(outer(25)) state++;
         } else{
           state++;
         }
@@ -792,13 +798,12 @@ switch (routine) {//------------------------------------------------------------
       case 3:
         if(move.stopForMillis(mili)) state++;
         break;
-      case 4:
-        static bool first = true;
+      case 4: // Complex logic for Ramp robot redundancy and lane correction
         if (!(lane == OUTER) && first == true){
           if(inner(180)) state++;
         } else if (first == true){
           state = 7;
-          first = false;
+          // first = false;
           break;
         }else if(!first){
           if(inner(180)) state++;
@@ -939,9 +944,9 @@ switch (routine) {//------------------------------------------------------------
           } 
         } else{
           if(robotSide == RIGHT){
-            if(move.rotate(mm(166), false)) state++;
+            if(move.rotate(mm(146), false)) state++;
           } else {
-            if(move.rotate(mm(166), true)) state++;
+            if(move.rotate(mm(146), true)) state++;
           }
         }
 
