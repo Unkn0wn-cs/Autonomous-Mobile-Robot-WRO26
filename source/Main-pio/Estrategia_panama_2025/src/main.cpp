@@ -414,16 +414,11 @@ void loop() {//-----------------------------------------------------------------
 
   //
 
-    // Last Routine Code ----------------------------------------------
-  static bool lastRoutine = false;
-  if (lastRoutine == false &&  (millis() > 105000 + startTime) ){ //&& (routine != 7 && routine != 5)
-    lastRoutine = true;
-    lane = OUTER;
-    lenght -= 30;
-  }
+    // Last Routine Code -- DESACTIVADO (nuevos reglamentos WRO: no se requiere rutina final de parrying)
+  // static bool lastRoutine = false;  // ya no se usa
   static bool midRoutine = false;
   static bool midRoutineDone = false;
-  if (midRoutine == false && midRoutineDone == false && (millis() > 45000 + startTime) ){ //&& (routine != 7 && routine != 5)
+  if (midRoutine == false && midRoutineDone == false && (millis() > 45000 + startTime) ){
     midRoutine = true;
     if (routine != 4 && lane != OUTER){
       lane = OUTER;
@@ -709,10 +704,11 @@ switch (routine) {//------------------------------------------------------------
         }
         routine = 6;
 
-        if (lastRoutine == true || midRoutine == true){
-          routine  = 9;
-          state = 0;
-        }
+        // Routine 9 (parrying) desactivada por nuevos reglamentos WRO
+        // if (lastRoutine == true || midRoutine == true){
+        //   routine  = 9;
+        //   state = 0;
+        // }
       break;
     }
   break;
@@ -901,10 +897,12 @@ switch (routine) {//------------------------------------------------------------
         }
 
 
-        if (lastRoutine == true){
-          routine = 4;
-          state = -1;
-        } else if(midRoutine == true && midRoutineDone == false){
+        // Routine 9 (lastRoutine) desactivada por nuevos reglamentos WRO
+        // if (lastRoutine == true){
+        //   routine = 4;
+        //   state = -1;
+        // } else 
+        if(midRoutine == true && midRoutineDone == false){
           routine = 4;
           state = -1;
         }
@@ -1052,79 +1050,10 @@ switch (routine) {//------------------------------------------------------------
         state = 0;
     }
 
-  case 9:
-    if (lastRoutine == false and millis() > 61000){
-      routine = 6;
-      state = 0;
-      break;
-    }
-    move.moveBeginStrafe();
-    pixy.ccc.getBlocks();
-    if (robotSide == LEFT){
-      if (pixy.ccc.numBlocks) {
-        int maxArea = 0;
-        int maxIndex = -1;
-        int moveby =  40;
-        int maxmove = 550;
-        static int movement = 0;
-
-        // Step 1: Find the largest orange block
-        for (int i = 0; i < pixy.ccc.numBlocks; i++) {
-          if (pixy.ccc.blocks[i].m_signature == orangeSignature) {
-            int area = pixy.ccc.blocks[i].m_width * pixy.ccc.blocks[i].m_height;
-            if (area > maxArea) {
-              maxArea = area;
-              maxIndex = i;
-            }
-          }
-        }
-
-        if (maxIndex != -1) {
-          int x = pixy.ccc.blocks[maxIndex].m_x;
-
-          if (x > 240 &&
-            ((robotSide == RIGHT && movement > 0) ||
-            (robotSide == LEFT && movement < maxmove))) {
-
-            while (true){
-              if(move.right(mm(moveby))) break;
-            }
-            Serial.print("MOVE RIGHT\n");
-            pixy.ccc.blocks[maxIndex].print();
-            if (robotSide == RIGHT){
-              movement -= moveby;
-            } else {
-              movement += moveby;
-            }
-          } else if (x < 140 &&
-            ((robotSide == LEFT && movement > 0) ||
-            (robotSide == RIGHT && movement < maxmove))) {
-            
-            while (true){
-              if(move.left(mm(moveby))) break;
-            }
-            Serial.print("MOVE LEFT\n");
-            pixy.ccc.blocks[maxIndex].print();
-            if (robotSide == RIGHT){
-              movement += moveby;
-            } else {
-              movement -= moveby;
-            }
-          } else {
-            move.stop();
-            pixy.ccc.blocks[maxIndex].print();
-          }
-        }
-      } delay(5);
-    }else {
-      routine = 10;
-      state = 0;
-    }
-    // if (lastRoutine == false and millis() > 62000){
-    //   routine = 6;
-    //   state = 0;
-    // }   
-    break;
+  // case 9: -- DESACTIVADO (nuevos reglamentos WRO: rutina de parrying no requerida)
+  // El robot mantiene su ciclo normal de captura y selección de franja.
+  // if (lastRoutine == false and millis() > 61000){ routine = 6; state = 0; break; }
+  // ... (código de parrying eliminado)
 
   case 10:
     switch(state){
