@@ -16,12 +16,12 @@ AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
 AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
 AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
 //LEFT - WALL
-  // int pwmf[4] = {240, 245, 245, 240};
-  // int pwms[4] = {220, 220, 225, 220};
+  int pwmf[4] = {240, 245, 245, 240};
+  int pwms[4] = {220, 220, 225, 220};
 
 //RIGHT - RAMP
-  int pwmf[4] = {230, 243, 243, 230};
-  int pwms[4] = {200, 200, 200, 200};
+  //  int pwmf[4] = {230, 248, 248, 230};
+  //  int pwms[4] = {200, 200, 200, 200};
   
 
 Encoders encoderLeft(A15, A14);	// Create an Encoder object name leftEncoder, using digitalpin 2 & 3
@@ -117,21 +117,21 @@ enum side {
 }; 
 
 //conditional------------------------------------------------------------------------------------- aqui Samuel 
-const long pulses = 1650; // Number of pulses for each movement step
-side robotSide = RIGHT;
-int slowRotorSpeed = 180; 
-// const long pulses = 1020; // Number of pulses for each movement step
-// side robotSide = LEFT;
-// int slowRotorSpeed = 90; 
+// const long pulses = 1650; // Number of pulses for each movement step
+// side robotSide = RIGHT;
+// int slowRotorSpeed = 180; 
+const long pulses = 1020; // Number of pulses for each movement step
+side robotSide = LEFT;
+int slowRotorSpeed = 90; 
 int lenght = 0;
 
 //servo--------------------------------------------
 // LEFT
-// int closedGate = 170;
-// int openGate = 55;
+int closedGate = 170;
+int openGate = 55;
 //RIGHT
-int closedGate = 96;
-int openGate = 0;
+// int closedGate = 96;
+// int openGate = 0;
 
 // functions-----------------------------------------------------------------------------
 
@@ -333,7 +333,7 @@ pixy.ccc.getBlocks();
 if (pixy.ccc.numBlocks > 0) {
   for (int j = 0; j < pixy.ccc.numBlocks; j++) {
     if (pixy.ccc.blocks[j].m_signature == purpleSignature &&
-        pixy.ccc.blocks[j].m_age > 50
+        pixy.ccc.blocks[j].m_age > 10
         && pixy.ccc.blocks[j].m_x > 105 && pixy.ccc.blocks[j].m_x < 300 &&
         pixy.ccc.blocks[j].m_y > 20 && pixy.ccc.blocks[j].m_y < 90
         ) {
@@ -416,26 +416,26 @@ void loop() {//-----------------------------------------------------------------
 
     // Last Routine Code ----------------------------------------------
   static bool lastRoutine = false;
-  if (lastRoutine == false &&  (millis() > 105000 + startTime) ){ //&& (routine != 7 && routine != 5)
-    lastRoutine = true;
-    lane = OUTER;
-    lenght -= 30;
-  }
+  // if (lastRoutine == false &&  (millis() > 105000 + startTime) ){ //&& (routine != 7 && routine != 5)
+  //   lastRoutine = true;
+  //   lane = OUTER;
+  //   lenght -= 30;
+  // }
   static bool midRoutine = false;
   static bool midRoutineDone = false;
-  if (midRoutine == false && midRoutineDone == false && (millis() > 45000 + startTime) ){ //&& (routine != 7 && routine != 5)
-    midRoutine = true;
-    if (routine != 4 && lane != OUTER){
-      lane = OUTER;
-    } else {
-      lane = MIDDLE;
-    }
-    lenght -= 30;
-  } else if(midRoutine == true && (millis() > 61000 + startTime) && (millis() < 100000 + startTime)){
-    midRoutine = false;
-    midRoutineDone = true;
-    lenght += 30;
-  }
+  // if (midRoutine == false && midRoutineDone == false && (millis() > 45000 + startTime) ){ //&& (routine != 7 && routine != 5)
+  //   midRoutine = true;
+  //   if (routine != 4 && lane != OUTER){
+  //     lane = OUTER;
+  //   } else {
+  //     lane = MIDDLE;
+  //   }
+  //   lenght -= 30;
+  // } else if(midRoutine == true && (millis() > 61000 + startTime) && (millis() < 100000 + startTime)){
+  //   midRoutine = false;
+  //   midRoutineDone = true;
+  //   lenght += 30;
+  // }
   int devices = testI2C();
 
   if (devices > 0) {
@@ -720,7 +720,7 @@ switch (routine) {//------------------------------------------------------------
     enableDrivers();  
     switch(state){
       case 0:
-        if(inner(50)) state++;
+        if(inner(60)) state++;
         break;
       case 1:
         if(move.stopForMillis(mili)) state++;
@@ -732,7 +732,7 @@ switch (routine) {//------------------------------------------------------------
         if(move.stopForMillis(mili)) state++;
         break;
       case 4:
-        if(move.forward(mm(160))) state++;
+        if(move.forward(mm(150))) state++;
         break;
       case 5:
         state++;
@@ -740,9 +740,9 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 6:
         if (robotSide == RIGHT){
-          if(move.forwardLeft(mm(280))) state++;
+          if(move.forwardLeft(mm(300))) state++;
         } else{
-          if(move.forwardRight(mm(200))) state++;
+          if(move.forwardRight(mm(250))) state++;
         }
         digitalWrite(LED, HIGH); 
         break;
