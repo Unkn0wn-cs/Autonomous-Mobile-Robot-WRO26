@@ -10,18 +10,47 @@
 #include "move.h"
 #include <Pixy2.h>
 
+//structs
+
+enum rlane {
+  OUTER, 
+  MIDDLE,
+  INNER
+}; rlane lane = MIDDLE;
+
+enum side {
+  RIGHT,
+  LEFT
+}; 
+
+
+
 //move
 AF_DCMotor motor1(1); // Motor 1 on the Adafruit Motor Shield
 AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
 AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
 AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
 //LEFT - WALL
-  int pwmf[4] = {240, 245, 245, 240};
-  int pwms[4] = {220, 220, 225, 220};
+  int pwmf[4] = {245, 243, 243, 245};
+  int pwms[4] = {220, 225, 220, 225};
+  const long pulses = 900; // Number of pulses for each movement step
+  side robotSide = LEFT;
+  int slowRotorSpeed = 90; 
+  int lenght = 0;
+  int closedGate = 170;
+  int openGate = 55;
+  int pixyBalls[16] = {0}; //Position of the puple Balls 🟣🟣🟣 writen as {x upper left corner 1st ball, y upper left corner 1st ball, x bottom right corner 1st ball, y bottom right corner 1st ball, ...}
 
 //RIGHT - RAMP
-  //  int pwmf[4] = {230, 248, 248, 230};
+  //  int pwmf[4] = {230, 243, 243, 230};
   //  int pwms[4] = {200, 200, 200, 200};
+  // const long pulses = 1650; // Number of pulses for each movement step
+  // side robotSide = RIGHT;
+  // int slowRotorSpeed = 180; 
+  // int closedGate = 96;
+  // int openGate = 0;
+  // int pixyBalls[16] = {0}; //Position of the puple Balls 🟣🟣🟣
+
   
 
 Encoders encoderLeft(A15, A14);	// Create an Encoder object name leftEncoder, using digitalpin 2 & 3
@@ -104,34 +133,6 @@ int connections;
 
 const int mili = 250; //delay
 const int diameter = 60; //Diameter of the wheel in mm
-
-enum rlane {
-  OUTER, 
-  MIDDLE,
-  INNER
-}; rlane lane = MIDDLE;
-
-enum side {
-  RIGHT,
-  LEFT
-}; 
-
-//conditional------------------------------------------------------------------------------------- aqui Samuel 
-// const long pulses = 1650; // Number of pulses for each movement step
-// side robotSide = RIGHT;
-// int slowRotorSpeed = 180; 
-const long pulses = 1020; // Number of pulses for each movement step
-side robotSide = LEFT;
-int slowRotorSpeed = 90; 
-int lenght = 0;
-
-//servo--------------------------------------------
-// LEFT
-int closedGate = 170;
-int openGate = 55;
-//RIGHT
-// int closedGate = 96;
-// int openGate = 0;
 
 // functions-----------------------------------------------------------------------------
 
@@ -323,8 +324,10 @@ void setup() { //---------------------------------------------------------------
 
 
 //   //Calculate purple position
-int center_y = 32;
+int center_y = 32; //rm changed 6/23/26
 int center_x = 200;
+
+// int outerBoundary[]= 105;
 
 int noballs = 0;
 

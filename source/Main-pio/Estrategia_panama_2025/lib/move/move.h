@@ -127,7 +127,7 @@ class Move {
     }
 
     bool backwardp(long pulses, bool position) {
-    int d = 9;
+    int d = 6;
     if (position == false){
       begin(pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);  
     }else{
