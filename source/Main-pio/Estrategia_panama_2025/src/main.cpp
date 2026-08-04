@@ -55,8 +55,17 @@ AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
 
 Encoders encoderLeft(A15, A14);	// Create an Encoder object name leftEncoder, using digitalpin 2 & 3
 Encoders encoderRight(A13 , A12); // Encoder object name rightEncoder using analog pin A0 and A1 
+// Rear wheel encoders, added so that all four wheels can be regulated against
+// each other. The front pair declared above still measures travelled distance,
+// so every distance already tuned into the routines keeps its meaning.
+//
+// >>> CONFIRM THESE TWO PIN PAIRS MATCH YOUR WIRING BEFORE DRIVING <<<
+Encoders encoderRearRight(A11, A10); // Motor 1
+Encoders encoderRearLeft(A9, A8);    // Motor 2
+
 Move move(
-  motor1, motor2, motor3, motor4, encoderLeft, encoderRight,
+  motor1, motor2, motor3, motor4,
+  encoderRearRight, encoderRearLeft, encoderLeft, encoderRight, // motor1..motor4
   pwmf[0], pwmf[1], pwmf[2], pwmf[3],      // Forward/backward PWM values
   pwms[0], pwms[1], pwms[2], pwms[3]       // Left/right/diagonal PWM values
 );
@@ -69,6 +78,10 @@ Servo myservo;
 
 bool cam;
 bool mpu;
+
+// Number of I2C devices found by the single scan done in setup(). See the note
+// there for why the scan no longer runs on every loop().
+int i2cDeviceCount = 0;
 
 //Pixy Cam---------------------------------------------
 int purpleSignature = 2;
@@ -293,6 +306,13 @@ void setup() { //---------------------------------------------------------------
 
   // //mpu 
   Wire.begin();           // Iniciando I2C
+
+  // The bus is scanned once, here, instead of on every pass of loop(). Probing
+  // all 126 addresses takes long enough that it made the loop period both long
+  // and irregular, and the wheel regulator cannot be tuned against a loop whose
+  // period keeps changing.
+  i2cDeviceCount = testI2C();
+
   sensor.initialize();    // Iniciando el sensor
 
   if (sensor.testConnection()) {Serial.println("Sensor iniciado correctamente"); mpu = true;}
@@ -439,7 +459,7 @@ void loop() {//-----------------------------------------------------------------
   //   midRoutineDone = true;
   //   lenght += 30;
   // }
-  int devices = testI2C();
+  int devices = i2cDeviceCount;
 
   if (devices > 0) {
     const float GYRO_SENSITIVITY = 131.0; // MPU6050 scale factor for ±250°/s
