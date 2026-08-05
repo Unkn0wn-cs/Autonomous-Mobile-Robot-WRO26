@@ -7,7 +7,7 @@ be made later without breaking something three layers away. It is split into:
 
 1. [Hardware map](#1-hardware-map) — every pin, verified against the libraries
 2. [Which robot am I building?](#2-which-robot-am-i-building)
-3. [Layer architecture](#3-layer-architecture)
+3. [Project layout & layer architecture](#3-project-layout--layer-architecture)
 4. [The movement stack](#4-the-movement-stack)
 5. [What changed in the 2026 redesign](#5-what-changed-in-the-2026-redesign)
 6. [Behaviour changes that need field retesting](#6-behaviour-changes-that-need-field-retesting)
@@ -15,6 +15,7 @@ be made later without breaking something three layers away. It is split into:
 8. [The rest of the system](#8-the-rest-of-the-system)
 9. [Rules for changing this code safely](#9-rules-for-changing-this-code-safely)
 10. [Known weak points and open questions](#10-known-weak-points-and-open-questions)
+11. [Restructure verification](#11-restructure-verification)
 
 ---
 
@@ -59,10 +60,8 @@ Viewed from above, front of robot pointing up:
 | `encoderRearRight` | A11, A10 | motor1 | rear right | synchronisation only |
 | `encoderRearLeft` | A9, A8 | motor2 | rear left | synchronisation only |
 
-> ⚠️ **The two rear pin pairs are UNCONFIRMED placeholders.** They were chosen
-> because A8–A11 sit on PORTK alongside the existing pairs and nothing else uses
-> them. Verify against the actual wiring before driving. They are at
-> `src/main.cpp` lines 63–64.
+All four pin pairs are **confirmed by the author**. They are declared in
+`src/Hardware.cpp`, and their declaration order is significant — see below.
 
 ### Timer usage — the silent killer
 
@@ -98,16 +97,23 @@ encoder gets*. Do not reorder those four declarations casually.
 
 ## 2. Which robot am I building?
 
-Both robots share one `main.cpp`. Selection is by **commenting / uncommenting**
-one of two config blocks near the top of the file:
+Both robots share one firmware. Selection is by **commenting / uncommenting**
+one of two config blocks — now in a file that exists purely for that purpose:
 
 ```
-//LEFT  - WALL   → src/main.cpp lines 33-42   (currently ACTIVE)
-//RIGHT - RAMP   → src/main.cpp lines 44-52   (currently COMMENTED)
+src/RobotConfig.cpp
+  //LEFT  - WALL    [ACTIVE]
+  //RIGHT - RAMP    [INACTIVE]
 ```
 
-Exactly one block must be active or the file will not compile (duplicate symbols)
-or will behave as the wrong robot. What differs between them:
+Exactly one block must be active. Both active will not compile (duplicate
+definitions); both commented out will not link (undefined references).
+
+> **Fixed during the restructure:** `lenght` used to be declared *inside the LEFT
+> block only*, which meant the RIGHT configuration did not compile at all. It now
+> sits outside both blocks. Both configurations have been build-verified.
+
+What differs between them:
 
 | Symbol | LEFT (wall) | RIGHT (ramp) | Meaning |
 |---|---|---|---|
@@ -127,29 +133,55 @@ branch on it.**
 
 ---
 
-## 3. Layer architecture
+## 3. Project layout & layer architecture
+
+The firmware was one 1170-line `main.cpp`. It is now split by responsibility.
+**No logic changed in that split** — see [section 11](#11-restructure-verification)
+for the proof.
+
+| File | Owns |
+|---|---|
+| `src/main.cpp` | `setup()` and `loop()` only. Wires the modules together. |
+| `src/RobotConfig.h/.cpp` | **The robot selector.** Enums and per-robot tuned values. |
+| `src/Hardware.h/.cpp` | Pins, motors, encoders, `Move`, servo, rotor, LED. |
+| `src/Sensors.h/.cpp` | Gyro, Pixy2, I2C bus, microswitch state. |
+| `src/Motion.h/.cpp` | `mm()`, `inner()`, `outer()` — strategy-level movement. |
+| `src/Routines.h/.cpp` | The routine/state machine and camera lane weighting. |
+| `lib/move/move.h` | `Move` — the motion primitives. |
+| `lib/move/WheelRegulator.h` | Ramp shaping and four-wheel synchronisation. |
+
+Dependency direction is strictly one way — nothing lower ever includes something
+higher:
 
 ```
 main.cpp
-  setup()  ── Pixy scan picks the opening routine (0-3), or defaults to 4
-  loop()   ── microswitch edges → state++
-           ── gyro integration  → ang_z
-           └─ switch(routine) → switch(state) → move.<primitive>(...)
-                                                      │
-                              ┌───────────────────────┘
-                              ▼
-                          move.h  (class Move)
-                            armMotion()      decides "is this a new move?"
-                            runSynchronised() drives motors + applies regulation
-                            checkDone*()     decides "am I there yet?"
-                              │                        │
-                              ▼                        ▼
-                    WheelRegulator.h            encoderLeft / encoderRight
-                    (ramp + wheel sync)         (front pair = ground truth)
-                              │
-                              ▼
-                        AFMotor (L293D shield)
+  ├─ handleMicroSwitches()   Routines   ── switch edges → state++
+  ├─ updateEndgameTiming()   Routines   ── disabled, see §8
+  ├─ updateGyro()            Sensors    ── heading → ang_z
+  └─ runRoutines()           Routines   ── MUST BE LAST
+        │
+        │  switch(routine) → switch(state) → move.<primitive>(...)
+        ▼
+   Motion (mm / inner / outer)
+        │
+        ▼
+   move.h  (class Move)
+     armMotion()       decides "is this a new move?"
+     runSynchronised() drives motors + applies regulation
+     checkDone*()      decides "am I there yet?"
+        │                        │
+        ▼                        ▼
+  WheelRegulator.h        encoderLeft / encoderRight
+  (ramp + wheel sync)     (front pair = ground truth)
+        │
+        ▼
+   AFMotor (L293D shield)
 ```
+
+**Why `runRoutines()` must be the last call in `loop()`:** routine 4 state 5
+contains a bare `return` for the LEFT robot on the INNER lane, which is expected
+to skip everything that would have followed it. Adding a call after it silently
+changes behaviour.
 
 **The single most important structural fact:** the routines never talk to motors
 or encoders directly. They only call `Move` methods, and every `Move` method is
@@ -362,23 +394,26 @@ then re-verify distances.
 `loop()` runs `switch (routine)` → `switch (state)`. `routine` picks the strategy;
 `state` steps through it. Both are plain globals; transitions are just assignments.
 
-| Routine | Line | Purpose |
-|---|---|---|
-| 0–3 | 498, 529, 561, 588 | Opening purple-ball handling, one per quadrant |
-| 4 | 623 | Main lane loop. `state` **counts down** (−1…−6) for the OUTER lane and up (0…5) for MIDDLE/INNER |
-| 5 | 742 | Diagonal lane |
-| 6 | 803 | Return + Pixy orange-ball weighting → picks next `lane` |
-| 7 | 937 | Corner reset, gyro-based rotation to ±80° |
-| 8 | 1067 | Re-orient to 0° then fall into routine 7 |
-| 9 | 1078 | Pixy ball tracking / parking |
-| 10 | 1152 | Debug |
+All of these live in `Routines.cpp`, inside `runRoutines()`.
 
-`setup()` chooses the opening routine by scanning up to 120 Pixy frames for the
-purple ball and classifying it into a quadrant around `(center_x=200, center_y=32)`
-→ routine 0, 1, 2 or 3. If nothing is found it stays at the default, **routine 4**.
+| Routine | Purpose |
+|---|---|
+| 0–3 | Opening purple-ball handling, one per camera quadrant |
+| 4 | Main lane loop. `state` **counts down** (−1…−6) for the OUTER lane and up (0…5) for MIDDLE/INNER |
+| 5 | Diagonal lane |
+| 6 | Return + Pixy orange-ball weighting → picks next `lane` |
+| 7 | Corner reset, gyro-based rotation to ±80° |
+| 8 | Re-orient to 0°, then **falls through** into routine 9 |
+| 9 | Pixy ball tracking / parking — **currently unreachable** |
+| 10 | Debug — **currently unreachable** |
 
-> ⚠️ `case 8:` at line 1067 has **no `break`** — it deliberately falls through into
-> `case 9:`. Verify whether that is intentional before adding code there.
+`selectOpeningRoutine()` chooses the opening routine by scanning up to 120 Pixy
+frames for the purple ball and classifying it into a quadrant around
+`(center_x=200, center_y=32)` → routine 0, 1, 2 or 3. If nothing is found it stays
+at the default, **routine 4**.
+
+> ⚠️ `case 8:` has **no `break`** — it deliberately falls through into `case 9:`
+> on every pass. Preserved exactly; do not add a `break` without testing.
 
 ### 8.2 Lane selection
 
@@ -417,10 +452,13 @@ The servo on pin 10 switches between `closedGate` (store) and `openGate` (shoot)
 
 ## 9. Rules for changing this code safely
 
+0. **Keep the dependency direction.** `Routines` may use `Motion`, `Sensors` and
+   `Hardware`; none of those may include `Routines`. Nothing includes `main.cpp`.
+   If you find yourself needing an upward include, the code is in the wrong module.
 1. **Never block inside `loop()`.** Every motion primitive is a state machine that
-   must be re-entered. `while (true) { if (move.right(...)) break; }` in routine 9
-   (lines ~1105 and ~1119) violates this and freezes all sensing and switch
-   handling for the duration. Do not copy that pattern.
+   must be re-entered. The two `while (true) { if (move.right(...)) break; }` loops
+   in routine 9 violate this and freeze all sensing and switch handling for the
+   duration. Do not copy that pattern.
 2. **Never add `delay()` to the movement path.** It stalls regulation and switch
    debouncing alike.
 3. **Preserve return semantics.** `forwardp` and `forwardRegulated` return `int`
@@ -430,8 +468,10 @@ The servo on pin 10 switches between `closedGate` (store) and `openGate` (shoot)
    every tuned distance in every routine becomes invalid at once.
 5. **Branch on `robotSide` for anything directional**, and check the *other* robot's
    config block still compiles when you touch the shared globals.
-6. **Do not reorder the four `Encoders` declarations** — construction order assigns
-   interrupt slots.
+6. **Do not reorder the four `Encoders` declarations, and do not move them out of
+   `Hardware.cpp`** — construction order assigns interrupt slots, and that order is
+   only guaranteed while all four sit in the same translation unit. `Move` is
+   constructed after them in the same file for the same reason.
 7. **Check the timer table** before using `analogWrite` on a new pin or attaching
    another servo.
 8. **`mm()` vs raw counts** — confirm which one an existing call uses before
@@ -472,3 +512,48 @@ The servo on pin 10 switches between `closedGate` (store) and `openGate` (shoot)
   reset between moves. Both are unused. Prefer deleting them over fixing them.
 - `lenght` is spelled that way throughout. Renaming it is a safe, mechanical
   change, but touches many lines.
+
+**Deliberately preserved bugs.** These are real defects, but the robot has been
+tuned around them, so "fixing" one changes how the robot drives. Each is marked
+`KNOWN` at its site in the code:
+
+| Where | What | Effect if "fixed" |
+|---|---|---|
+| Routine 4 state −2, routine 7 state 6 | `outer(mm(20))` double-converts — `outer()` calls `mm()` internally, so this is `mm(mm(20))` ≈ 453 counts, not 95 | Robot strafes ~4× less |
+| Routine 6 state 6 | `classifyLane(..., true)` is hard-coded, so LEFT uses RIGHT's boundary lines | Lane selection changes |
+| `handleMicroSwitches()` | `int currentTime = millis()` — 16-bit on AVR, wraps every 32.767 s | Switch debounce timing changes |
+| `startTime` | same 16-bit truncation; only read by the disabled timing block | none today |
+| Routine 9 / 10 | `millis() > 61000` is absolute, not `startTime + 61000` | unreachable today |
+
+---
+
+## 11. Restructure verification
+
+The split from one 1170-line file into modules was verified mechanically against
+the pre-restructure commit, not by eye. Comments and whitespace were stripped and
+the remaining source compared.
+
+| Check | Method | Result |
+|---|---|---|
+| Routine state machine, 674 lines | MD5 of flattened source | **identical** |
+| `mm`, `inner`, `outer` | per-function diff | identical |
+| `testI2C`, `filterGyro`, `resetGyroAngles`, `onSwitchPress` | per-function diff | identical |
+| `classifyLane` | per-function diff | identical |
+| `enableDrivers`, `enableSlowDrivers`, `disableDrivers`, `blink` | per-function diff | identical |
+| `setup()`, 78 statements | sorted statement-set diff | identical |
+| `loop()` pre-switch | sorted statement-set diff | 3 expected lines (below) |
+| LEFT build | `pio run` | SUCCESS, RAM 1543 B — byte-identical to before |
+| RIGHT build | `pio run` | SUCCESS — **was impossible before** |
+
+**The only intentional source changes in the whole restructure:**
+
+1. `lastRoutine`, `midRoutine`, `midRoutineDone` went from `static` locals inside
+   `loop()` to file-scope globals in `Routines.cpp`, because the routines need to
+   read them. A function-level `static` and a file-scope global have identical
+   lifetime and one-time zero-initialisation — the same object, differently scoped.
+2. `lenght` moved out of the LEFT-only block so the RIGHT build compiles.
+3. The three microswitch `pinMode()` calls moved a few lines earlier, into
+   `initHardware()`. Pins 14/18/19 have no interaction with Serial, I2C or the
+   MPU6050, so their position relative to those is inert.
+
+Nothing else changed. No distance, no threshold, no conditional, no ordering.

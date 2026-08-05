@@ -63,8 +63,8 @@ class WheelRegulator {
     // ---- Acceleration profile tuning --------------------------------------
     // PWM used at the very start and the very end of a move, as a fraction of the
     // nominal PWM, in 1/256ths. 145/256 is about 57%.
-    uint8_t startFactor = 145;
-    uint8_t endFactor = 130;
+    uint8_t startFactor = 215;
+    uint8_t endFactor = 200;
 
     // How much of the move is spent ramping, in 1/256ths of the total distance.
     uint8_t accelFraction = 64; // 25% of the move
