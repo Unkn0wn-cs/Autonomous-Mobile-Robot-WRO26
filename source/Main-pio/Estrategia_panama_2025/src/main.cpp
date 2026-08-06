@@ -1,4 +1,4 @@
-    int LED = 34;
+﻿    int LED = 34;
 
 #include <Arduino.h>
 #include <AFMotor.h>
@@ -31,7 +31,7 @@ AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
 AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
 AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
 //LEFT - WALL
-  int pwmf[4] = {245, 243, 243, 245};
+  int pwmf[4] = {245, 236, 236, 245};
   int pwms[4] = {220, 225, 220, 225};
   const long pulses = 900; // Number of pulses for each movement step
   side robotSide = LEFT;
@@ -39,17 +39,17 @@ AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
   int lenght = 0;
   int closedGate = 170;
   int openGate = 55;
-  int pixyBalls[16] = {0}; //Position of the puple Balls 🟣🟣🟣 writen as {x upper left corner 1st ball, y upper left corner 1st ball, x bottom right corner 1st ball, y bottom right corner 1st ball, ...}
+  //Position of the purple Balls 🟣🟣🟣 -> see ballZonesLeft in the Pixy Cam section below
 
 //RIGHT - RAMP
   //  int pwmf[4] = {230, 243, 243, 230};
   //  int pwms[4] = {200, 200, 200, 200};
   // const long pulses = 1650; // Number of pulses for each movement step
   // side robotSide = RIGHT;
-  // int slowRotorSpeed = 180; 
+  // int slowRotorSpeed = 180;
   // int closedGate = 96;
   // int openGate = 0;
-  // int pixyBalls[16] = {0}; //Position of the puple Balls 🟣🟣🟣
+  //Position of the purple Balls 🟣🟣🟣 -> see ballZonesRight in the Pixy Cam section below
 
   
 
@@ -80,6 +80,104 @@ const int ANCHO_IMAGEN = 316; // Pixy2 horizontal resolution
 int pesos[NUM_FRANJAS] = {0};
 int camera = 0;
 
+// --- Purple ball position zones 🟣 --------------------------------------------------------
+//
+// The Pixy2 image is 316 x 208 and its ORIGIN IS THE TOP-LEFT corner, so x grows to the
+// right and y grows DOWNWARD: a point that looks "lower" on screen has the LARGER y.
+//
+// Every ball position is one rectangle written as two OPPOSITE CORNERS:
+//                              { xA, yA, xB, yB }
+// The order of the two corners does not matter - the scorer normalises to min/max - so
+// {lower-left, upper-right} and {upper-left, bottom-right} are both accepted. Write down
+// whichever pair is easier to read off PixyMon.
+//
+// HOW TO CALIBRATE
+//   1. Put a purple ball at one position and leave the robot exactly where it starts.
+//   2. Read the block Pixy reports (PixyMon, or the "blob" line this code prints on Serial
+//      which already gives you the four edges: left, top, right, bottom).
+//   3. Enter a rectangle that CONTAINS that blob. You do not need to pad it by hand - the
+//      code already allows BALL_ZONE_TOLERANCE px of slack on every side (see the sensitivity
+//      block below), so write down what you actually measured.
+//   4. Zones may overlap or touch; the scorer picks the best match, not the first one, and
+//      grades near-misses by distance so the closer rectangle always wins. What must NOT
+//      happen is a zone stretching over a neighbouring ball position.
+//   5. Anything outside every zone (plus its tolerance) is treated as noise and ignored, so
+//      keep the rectangles away from purple-ish reflections on the mat or the walls.
+//
+// The row index IS the routine that will be executed for that ball:
+//   row 0 -> routine 0 : ball high & left  in the image ("upper left")
+//   row 1 -> routine 1 : ball high & right in the image ("upper right", strafes right 200 mm first)
+//   row 2 -> routine 2 : ball low  & left  in the image ("lower left")
+//   row 3 -> routine 3 : ball low  & right in the image ("lower right", strafes right 200 mm first)
+// No match at all leaves routine 4, the normal no-ball lane loop.
+//
+// A row left as { 0, 0, 0, 0 } is an empty rectangle: it has no area, so it can never match
+// anything. An un-filled row therefore just means "this ball position is never chosen" and
+// the robot falls through to routine 4 - it will never guess a position it has no numbers
+// for.
+
+const int NUM_BALL_ZONES = 4;
+
+// LEFT / WALL robot - measured values.
+const int ballZonesLeft[NUM_BALL_ZONES][4] = {
+  { 135,  20,  160,  0  },   // routine 0 - upper left
+  { 235,  25,  260,  10 },   // routine 1 - upper right
+  { 135,  40,  160,  20 },   // routine 2 - lower left
+  { 260,  55,  290,  25 }    // routine 3 - lower right
+};
+
+// RIGHT / RAMP robot - measured values.
+const int ballZonesRight[NUM_BALL_ZONES][4] = {
+  { 160,  20,  200,  32 },   // routine 0 - upper left
+  { 200,  20,  300,  32 },   // routine 1 - upper right
+  { 105,  32,  200,  90 },   // routine 2 - lower left
+  { 200,  32,  300,  90 }    // routine 3 - lower right
+};
+
+// --- Ball detector sensitivity ------------------------------------------------------------
+// Tuned to be as permissive as possible WITHOUT letting specks of dust vote: the quality
+// gates below only reject things that cannot physically be the ball (too small, too thin,
+// only seen for a single frame), while the multi-frame vote is what actually guarantees the
+// decision is correct.
+const uint8_t BALL_MIN_AGE     = 2;    // camera frames the blob must have been tracked for.
+                                       //   Was 10, which cost ~165 ms before a ball counted.
+                                       //   2 only rejects one-frame flicker; the vote below
+                                       //   does the real confirming.
+const int  BALL_MIN_SIDE       = 5;    // px. Blob must be at least this wide AND this tall.
+const long BALL_MIN_AREA       = 45;   // px^2. Anti-dust floor - a real ball is far bigger.
+const int  BALL_MAX_ASPECT_X10 = 30;   // 3.0 : rejects long thin smears / glare streaks.
+                                       //   Deliberately lenient so a ball clipped by the
+                                       //   frame edge still passes.
+const int  BALL_ZONE_TOLERANCE = 20;   // px of slack around every measured rectangle, on all
+                                       //   four sides. A ball whose centre lands outside a
+                                       //   zone still matches it, so the numbers you type in
+                                       //   do not have to be perfect.
+                                       //   It is NOT a plain box inflation: matches inside the
+                                       //   band are graded by distance, so when two zones are
+                                       //   both within reach the closer one wins outright
+                                       //   instead of the two fighting. That is what keeps
+                                       //   touching zones - like LEFT rows 0 and 2, which
+                                       //   share the edge y=20 - unambiguous no matter how
+                                       //   wide this gets. See scoreBallZone().
+                                       //   Widening this only costs false-POSITIVE margin (a
+                                       //   stray purple object further from a real position
+                                       //   can now reach a zone), never zone-vs-zone accuracy.
+                                       //   BALL_CONFIRM_SOFT below is what pays that back.
+const long BALL_MIN_SCORE      = 20;   // see scoreBallZone(): >=200 means "centre inside a
+                                       //   zone", 100..199 "centre within tolerance of one",
+                                       //   20..99 "clearly overlapping one".
+const int  BALL_CONFIRM_FRAMES = 3;    // frames one zone must win before we commit, when that
+                                       //   zone has had at least one solid hit (centre truly
+                                       //   inside the measured rectangle, score >= 200).
+const int  BALL_CONFIRM_SOFT   = 5;    // ...but this many when ALL the evidence came from the
+                                       //   tolerance band. Evidence that leans on the slack is
+                                       //   held to a higher bar, which is what lets the
+                                       //   tolerance above be generous without getting loose.
+const int  BALL_VOTE_MARGIN    = 2;    // frames the leader must lead the rest by, either way.
+const unsigned long BALL_SCAN_MS   = 900;  // hard ceiling on the whole scan (was ~3.5 s).
+const unsigned long BALL_GIVEUP_MS = 350;  // if NOTHING ball-like has been seen by now, stop
+                                           //   early so an empty field costs almost nothing.
+
 // --- Microswitch Gyro Reset Extension ----------------------------------------------------------------
 
 const byte backSwitchPin = 18; // For interrupt on Mega
@@ -99,7 +197,29 @@ const int input3   = 48; // L293D pin 15
 
 // Declaración de variables para la velocidad
 int velocidad = 210; // Valor inicial de velocidad (0 a 255)
- 
+
+// --- Buzzer debug 🔊 -----------------------------------------------------------------------
+// DEBUG ONLY. Beeps out which routine the ball detector picked, so you can check the camera
+// decision without a serial cable attached.
+//
+// Wiring: buzzer + on pin 47, buzzer - on pin 46.
+//   Pin 46 is input4 above, the L293D rotor direction line. setup() drives it LOW and never
+//   touches it again, so it works as a permanent ground for the buzzer. If the rotor logic
+//   is ever changed to drive input4 HIGH, move the buzzer's negative leg to a real GND pin.
+//
+// TO TURN IT OFF: set BUZZER_DEBUG to 0. Every buzzer call then compiles away to nothing -
+// no flash, no RAM, no delay - so it cannot interfere with a competition run. Leave it at 0
+// for real runs: the announcement blocks for up to ~1.5 s and it happens AFTER startTime is
+// set, so it does eat into the strategy timers in loop().
+#define BUZZER_DEBUG    1      // 1 = beep the routine, 0 = compiled out entirely
+#define BUZZER_PIN      47
+#define BUZZER_TONE_HZ  2500   // square wave bit-banged in software; audible on both passive
+                               //   and active buzzers. Set to 0 to hold the pin flat HIGH
+                               //   instead, which is the cleaner drive for an ACTIVE buzzer.
+                               //   NOTE: tone() is deliberately NOT used here - on the Mega
+                               //   it owns Timer2, and AFMotor already uses Timer2 for the
+                               //   motor PWM, so tone() would fight the drive train.
+
 // variables for GyroScope ----------------------------------------------------------------------------
 // Valores RAW (sin procesar) del acelerometro y giroscopio en los ejes x,y,z
 int ax, ay, az;
@@ -223,9 +343,285 @@ int classifyLane(float x, float y, bool right) {
         return 1; // Lane 3
     }
 }
+// --- Buzzer debug helpers 🔊 ---------------------------------------------------------------
+// Everything in here disappears when BUZZER_DEBUG is 0. See the wiring / on-off notes next to
+// the BUZZER_PIN define at the top of the file.
+#if BUZZER_DEBUG
+
+void buzzerBeep(unsigned int onMs) {
+#if BUZZER_TONE_HZ > 0
+  // Bit-banged square wave. Blocking, but this only ever runs from setup().
+  unsigned long halfPeriod = 500000UL / (unsigned long)BUZZER_TONE_HZ;   // microseconds
+  unsigned long cycles     = ((unsigned long)onMs * 1000UL) / (halfPeriod * 2UL);
+  for (unsigned long i = 0; i < cycles; i++) {
+    digitalWrite(BUZZER_PIN, HIGH);
+    delayMicroseconds(halfPeriod);
+    digitalWrite(BUZZER_PIN, LOW);
+    delayMicroseconds(halfPeriod);
+  }
+#else
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(onMs);
+#endif
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// Announces a number: one long lead-in beep, then `count` short beeps.
+// The lead-in is there so that count == 0 (routine 0) is still clearly distinguishable from
+// the buzzer simply not working.
+void buzzerAnnounce(int count) {
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  buzzerBeep(300);
+  delay(300);
+
+  for (int i = 0; i < count; i++) {
+    buzzerBeep(100);
+    delay(160);
+  }
+}
+
+#else
+  #define buzzerAnnounce(count)  do {} while (0)
+#endif
+
+// --- Purple ball detection 🟣 --------------------------------------------------------------
+//
+// Replaces the old "first purple blob to cross a centre line wins" logic. That version could
+// be fooled by a single bad frame and, because it demanded m_age > 10 while giving up after
+// 10 empty frames, it could also abort before a real ball ever became eligible.
+//
+// The new detector works on the BALL'S EDGES instead of just its centroid, and confirms the
+// answer over several frames:
+//
+//   1. Quality gate - a blob must be purple, tracked for a couple of frames, big enough and
+//      roughly round. This is the "not a grain of dust" filter.
+//   2. Zone scoring - the blob's bounding box is scored against every calibrated rectangle,
+//      with BALL_ZONE_TOLERANCE px of graded slack around each one. A blob matching no zone
+//      is DISCARDED rather than being forced into a quadrant, which is what stops the robot
+//      from "detecting the ball where it isn't".
+//   3. Voting - only the largest valid blob of each frame votes, so the ball and a speck can
+//      never both score in the same frame.
+//   4. Early commit - the scan stops the moment one zone is clearly ahead, so a clean ball is
+//      decided in roughly 5 camera frames (~85 ms) instead of the old 10+ forced frames.
+
+// Area of the overlap between two axis-aligned rectangles; 0 when they do not touch.
+// Returns long because a full-frame box (316 x 208) overflows a 16-bit AVR int.
+long rectOverlap(int aL, int aT, int aR, int aB, int bL, int bT, int bR, int bB) {
+  int w = min(aR, bR) - max(aL, bL);
+  int h = min(aB, bB) - max(aT, bT);
+  if (w <= 0 || h <= 0) return 0;
+  return (long)w * (long)h;
+}
+
+// Scores one blob box against one zone. Higher is better, 0 means no relation.
+// The result falls into three tiers that never cross, so the ranking between zones is
+// always well defined:
+//
+//   200..300 : the blob's centre is INSIDE the measured rectangle. Strongest evidence.
+//              The 0..100 on top is the box overlap, which is what separates two zones
+//              that both contain the centre (touching zones) - the rectangle holding more
+//              of the ball wins, which is the physically correct answer.
+//   100..199 : the centre is OUTSIDE the rectangle but within BALL_ZONE_TOLERANCE of it.
+//              Graded by how far outside it is, so when two zones are both in reach the
+//              CLOSER one always wins outright - never a coin flip between neighbours.
+//     0..100 : the centre is well outside, but the boxes still overlap. Normalised by the
+//              SMALLER of the two boxes so a wide zone and a tight, ball-sized zone are
+//              judged on the same scale.
+long scoreBallZone(int bL, int bT, int bR, int bB, long blobArea, const int zone[4]) {
+  int zL = min(zone[0], zone[2]);
+  int zR = max(zone[0], zone[2]);
+  int zT = min(zone[1], zone[3]);
+  int zB = max(zone[1], zone[3]);
+
+  // An un-filled { 0, 0, 0, 0 } row has no area and must never match anything. This check
+  // has to happen BEFORE the tolerance is applied, otherwise the slack would turn an empty
+  // row into a live region around the top-left corner of the image.
+  if (zR - zL <= 0 || zB - zT <= 0) return 0;
+
+  int cx = (bL + bR) / 2;
+  int cy = (bT + bB) / 2;
+
+  // How far the centre sits outside the rectangle on each axis; 0 when it is inside.
+  int dx = 0, dy = 0;
+  if (cx < zL)      dx = zL - cx;
+  else if (cx > zR) dx = cx - zR;
+  if (cy < zT)      dy = zT - cy;
+  else if (cy > zB) dy = cy - zB;
+
+  long zoneArea = (long)(zR - zL) * (long)(zB - zT);
+  long refArea  = (blobArea < zoneArea) ? blobArea : zoneArea;
+  long overlap  = rectOverlap(bL, bT, bR, bB, zL, zT, zR, zB);
+  long overlapScore = (refArea > 0) ? (overlap * 100L) / refArea : 0;
+
+  if (dx == 0 && dy == 0) {
+    return 200 + overlapScore;                    // centre inside the measured rectangle
+  }
+
+  if (dx <= BALL_ZONE_TOLERANCE && dy <= BALL_ZONE_TOLERANCE) {
+    // Inside the tolerance band. miss runs 1..2*tolerance, so the penalty runs 0..100 and
+    // the tier stays between 100 and 199 - always above a pure-overlap match, always below
+    // a centre that is genuinely inside some other zone.
+    long miss    = (long)dx + (long)dy;
+    long penalty = (miss * 100L) / (2L * (long)BALL_ZONE_TOLERANCE);
+    return 200 - penalty - 1;
+  }
+
+  return overlapScore;                            // far outside, judged on overlap alone
+}
+
+const char *ballZoneName(int zone) {
+  switch (zone) {
+    case 0: return "upper left  -> routine 0";
+    case 1: return "upper right -> routine 1";
+    case 2: return "lower left  -> routine 2";
+    case 3: return "lower right -> routine 3";
+  }
+  return "no ball -> routine 4";
+}
+
+// Returns the ball position index 0..3, or -1 when no ball could be confirmed.
+int detectBallZone() {
+  const int (*zones)[4] = (robotSide == RIGHT) ? ballZonesRight : ballZonesLeft;
+
+  int  votes[NUM_BALL_ZONES]  = {0};
+  long weight[NUM_BALL_ZONES] = {0};
+  bool solid[NUM_BALL_ZONES]  = {false};   // zone has had >=1 centre-inside hit, not just slack
+  bool seenAnything = false;
+
+  unsigned long scanStart = millis();
+  int committed = -1;
+
+  while (millis() - scanStart < BALL_SCAN_MS) {
+
+    // Non-blocking read. A negative result is BUSY (no new frame yet) or a link error;
+    // either way it is NOT evidence of an empty field, so it must not count as a sample.
+    // The old code conflated the two, which is what made its give-up counter misbehave.
+    if (pixy.ccc.getBlocks(false) < 0) {
+      delayMicroseconds(500);
+      continue;
+    }
+
+    int  frameZone  = -1;
+    long frameArea  = 0;
+    long frameScore = 0;
+    int  frameL = 0, frameT = 0, frameR = 0, frameB = 0;
+
+    for (int i = 0; i < pixy.ccc.numBlocks; i++) {
+      Block &b = pixy.ccc.blocks[i];
+
+      if ((int)b.m_signature != purpleSignature) continue;
+      if (b.m_age < BALL_MIN_AGE) continue;
+
+      int bw = (int)b.m_width;
+      int bh = (int)b.m_height;
+      if (bw < BALL_MIN_SIDE || bh < BALL_MIN_SIDE) continue;
+
+      long area = (long)bw * (long)bh;
+      if (area < BALL_MIN_AREA) continue;
+
+      // A ball is about as wide as it is tall; reject streaks and reflections.
+      if ((long)bw * 10L > (long)bh * (long)BALL_MAX_ASPECT_X10) continue;
+      if ((long)bh * 10L > (long)bw * (long)BALL_MAX_ASPECT_X10) continue;
+
+      // Both edges of the blob. m_x / m_y are uint16_t, so cast BEFORE subtracting or a
+      // blob near the left/top border wraps around to ~65000.
+      int cx = (int)b.m_x;
+      int cy = (int)b.m_y;
+      int bL = cx - bw / 2;
+      int bR = cx + bw / 2;
+      int bT = cy - bh / 2;
+      int bB = cy + bh / 2;
+
+      int  bestZone  = -1;
+      long bestScore = 0;
+      for (int z = 0; z < NUM_BALL_ZONES; z++) {
+        long score = scoreBallZone(bL, bT, bR, bB, area, zones[z]);
+        if (score > bestScore) { bestScore = score; bestZone = z; }
+      }
+
+      // Purple, ball-shaped, but not at any calibrated ball position -> noise.
+      if (bestZone < 0 || bestScore < BALL_MIN_SCORE) continue;
+
+      // Only the biggest valid blob of this frame is allowed to vote.
+      if (area > frameArea) {
+        frameArea  = area;
+        frameZone  = bestZone;
+        frameScore = bestScore;
+        frameL = bL; frameT = bT; frameR = bR; frameB = bB;
+      }
+    }
+
+    if (frameZone < 0) {
+      // Nothing ball-like in this frame. Bail out early only while we have never seen a
+      // ball at all - once there is evidence, keep sampling for the full budget.
+      if (!seenAnything && millis() - scanStart > BALL_GIVEUP_MS) break;
+      continue;
+    }
+
+    seenAnything = true;
+    votes[frameZone]++;
+    weight[frameZone] += frameArea;
+    if (frameScore >= 200) solid[frameZone] = true;   // centre truly inside the rectangle
+
+    Serial.print("blob edges L");
+    Serial.print(frameL); Serial.print(" T"); Serial.print(frameT);
+    Serial.print(" R");    Serial.print(frameR); Serial.print(" B"); Serial.print(frameB);
+    Serial.print(frameScore >= 200 ? "  solid  -> " : "  in-tol -> ");
+    Serial.println(ballZoneName(frameZone));
+
+    // Leader and runner-up over everything collected so far. Ties break on accumulated
+    // blob area, so the closer/bigger sighting wins.
+    int leader = 0, runnerUp = -1;
+    for (int z = 1; z < NUM_BALL_ZONES; z++) {
+      if (votes[z] > votes[leader] ||
+         (votes[z] == votes[leader] && weight[z] > weight[leader])) leader = z;
+    }
+    for (int z = 0; z < NUM_BALL_ZONES; z++) {
+      if (z == leader) continue;
+      if (runnerUp < 0 || votes[z] > votes[runnerUp]) runnerUp = z;
+    }
+
+    // A zone that has been hit dead-on at least once commits quickly. One that has only
+    // ever matched through the tolerance slack has to prove itself over more frames - that
+    // is the price of the generous BALL_ZONE_TOLERANCE, and it is only paid in the rare
+    // case where the calibration is off enough that the ball never lands inside the box.
+    int needed = solid[leader] ? BALL_CONFIRM_FRAMES : BALL_CONFIRM_SOFT;
+
+    if (votes[leader] >= needed &&
+        votes[leader] - votes[runnerUp] >= BALL_VOTE_MARGIN) {
+      committed = leader;
+      break;
+    }
+  }
+
+  // Budget ran out without a clear winner: use the best evidence we have rather than
+  // throwing away a ball we definitely saw.
+  if (committed < 0) {
+    for (int z = 0; z < NUM_BALL_ZONES; z++) {
+      if (votes[z] == 0) continue;
+      if (committed < 0 || votes[z] > votes[committed] ||
+         (votes[z] == votes[committed] && weight[z] > weight[committed])) committed = z;
+    }
+  }
+
+  Serial.print("ball scan ");
+  Serial.print(millis() - scanStart);
+  Serial.print(" ms  votes ");
+  for (int z = 0; z < NUM_BALL_ZONES; z++) {
+    Serial.print(votes[z]);
+    Serial.print(' ');
+  }
+  Serial.print(" => ");
+  Serial.println(ballZoneName(committed));
+
+  return committed;
+}
+
 void enableSlowDrivers() {
-  pinMode(enable34, OUTPUT); 
-  analogWrite(enable34, slowRotorSpeed); 
+  pinMode(enable34, OUTPUT);
+  analogWrite(enable34, slowRotorSpeed);
 }
 void enableDrivers() {
   pinMode(enable34, OUTPUT);
@@ -323,66 +719,21 @@ void setup() { //---------------------------------------------------------------
   enableDrivers();
 
 
-//   //Calculate purple position
-int center_y = 32; //rm changed 6/23/26
-int center_x = 200;
+  //Calculate purple position ---------------------------------------------------------------
+  // The zone rectangles and the sensitivity constants live in the Pixy Cam section at the
+  // top of this file; detectBallZone() confirms the answer over several camera frames and
+  // returns the ball position, or -1 when there is no ball to chase.
+  int ballZone = detectBallZone();
+  if (ballZone >= 0) {
+    routine = ballZone;   // routines 0..3 are the four ball-capture sequences
+  }
+  // routine stays 4 (the plain lane loop) when nothing was confirmed.
 
-// int outerBoundary[]= 105;
+  pixy.setLamp(0, 0);
 
-int noballs = 0;
-
-for (int i = 0; i < 120; i++){
-pixy.ccc.getBlocks();
-if (pixy.ccc.numBlocks > 0) {
-  for (int j = 0; j < pixy.ccc.numBlocks; j++) {
-    if (pixy.ccc.blocks[j].m_signature == purpleSignature &&
-        pixy.ccc.blocks[j].m_age > 10
-        && pixy.ccc.blocks[j].m_x > 105 && pixy.ccc.blocks[j].m_x < 300 &&
-        pixy.ccc.blocks[j].m_y > 20 && pixy.ccc.blocks[j].m_y < 90
-        ) {
-          
-      int ix = pixy.ccc.blocks[j].m_x; 
-      int iy = pixy.ccc.blocks[j].m_y;
-      //definir routine 
-      if (ix < center_x && iy < center_y){
-        routine = 0;
-        pixy.ccc.blocks[j].print();
-        // blink();
-        Serial.print("upper left corner, case 1");
-        return;
-      } else if (ix > center_x && iy < center_y){
-        routine = 1;
-        pixy.ccc.blocks[j].print();
-        // blink(); blink();
-        Serial.print("upper right corner, case 3");
-        return;
-      } else if (ix < center_x && iy > center_y){
-        routine = 2;
-        pixy.ccc.blocks[j].print();
-        // blink(); blink(); blink();
-        Serial.print("lower left corner, case 0");
-        return;
-      } else if (ix > center_x && iy > center_y){
-        routine = 3;
-        pixy.ccc.blocks[j].print();
-        // blink(); blink(); blink(); blink();
-        Serial.print("lower Right corner, case 2");
-        return;
-      }
-    } 
-  } 
-  } else if (noballs < 10){
-    noballs++;
-  } else {return;}
-  delay(14);
-}
-
-
-pixy.setLamp(0, 0);
-
-
-
-
+  // Beep out the chosen routine: long beep, then `routine` short beeps.
+  // Debug aid only - set BUZZER_DEBUG to 0 at the top of the file to remove it completely.
+  buzzerAnnounce(routine);
 
 
 }
