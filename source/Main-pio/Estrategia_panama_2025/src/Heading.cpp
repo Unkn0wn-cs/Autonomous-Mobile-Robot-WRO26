@@ -50,6 +50,7 @@ static bool     resetPending = false;  // references invalid until next report
 static float    current      = 0.0f;   // degrees, 0-360
 static float    target       = 0.0f;   // movement-layer reference
 static float    zero         = 0.0f;   // routine-layer reference
+static float    boot         = 0.0f;   // telemetry reference
 static uint8_t  accuracy     = 0;
 static uint8_t  foundAddress = 0;
 static unsigned long lastPoll    = 0;
@@ -102,6 +103,7 @@ bool headingBegin() {
 
   headingCaptureTarget();
   headingZero();
+  boot = current;
   return true;
 }
 
@@ -144,6 +146,7 @@ void headingUpdate() {
     resetPending = false;
     target = current;
     zero   = current;
+    boot   = current;
   }
 }
 
@@ -169,4 +172,9 @@ void  headingZero() { zero = current; }
 float headingSinceZero() {
   if (!headingAvailable()) return 0.0f;
   return HEADING_SIGN * wrap180(current - zero);
+}
+
+float headingSinceBoot() {
+  if (!headingAvailable()) return 0.0f;
+  return HEADING_SIGN * wrap180(current - boot);
 }

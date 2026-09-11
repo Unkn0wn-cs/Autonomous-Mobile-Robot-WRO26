@@ -9,6 +9,7 @@
 //   9             rotor L293D enable (analogWrite, Timer2)
 //   10            gate servo (Servo library, Timer5)
 //   14            start switch
+//   16, 17        Serial2 TX2 / RX2 - Bluetooth telemetry module (main.cpp)
 //   18, 19        back / side microswitches (polled, NOT interrupts)
 //   20, 21        I2C (BNO08x heading sensor)
 //   34            debug LED

@@ -31,7 +31,7 @@
   extern const long pulses = 1650;  // encoder counts per wheel revolution
   side robotSide = RIGHT;
   int slowRotorSpeed = 180;
-  int closedGate = 96;
+  int closedGate =116;
   int openGate = 0;
 
 // ===========================================================================

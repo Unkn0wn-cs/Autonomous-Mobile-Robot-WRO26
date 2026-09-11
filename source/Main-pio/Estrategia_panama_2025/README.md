@@ -222,13 +222,14 @@ contains a bare `return` that is expected to skip everything after it).
 
 ## 5. Building and running
 
-Three PlatformIO environments in [`platformio.ini`](platformio.ini):
+Four PlatformIO environments in [`platformio.ini`](platformio.ini):
 
 | Environment | What it builds | Baud |
 |---|---|---|
 | `megaatmega2560` | the competition firmware (`src/` minus `src/test/`) | 115200 |
 | `square_test` | 500 mm square bench test — same `Move`, regulator and sensor | 115200 |
 | `heading_test` | BNO08x readout only, the robot does not move | 115200 |
+| `bt_passthrough` | AT-command bridge to the Bluetooth module, the robot does not move | 115200 |
 
 `default_envs = megaatmega2560`: the VSCode toolbar buttons build and flash the
 competition firmware. For the tests use the PlatformIO sidebar (Project Tasks →
@@ -241,22 +242,70 @@ pio device monitor -e square_test
 
 ### Telemetry (competition firmware)
 
-One line every 250 ms at 115200:
+One line every 250 ms, identical on the USB serial (115200) and on **Serial2**
+(TX2 = pin 16, RX2 = pin 17, **9600** — `BLUETOOTH_BAUD` in `src/main.cpp`),
+where a Bluetooth serial module streams it to a phone or laptop while the robot
+drives:
 
 ```
-r=4 s=2 err=-0.35 corr=3.2 age=3 rst=0 hz=1240
+r=4 s=2 deg=-1.2 err=-0.35 corr=3.2 pwm=232,240,228,235 v=310,305,312,300 age=3 rst=0 hz=1240
 ```
 
 | Field | Meaning |
 |---|---|
 | `r`, `s` | routine and state |
+| `deg` | heading since power-on, degrees (0 when the sensor is stale) |
 | `err` | heading error the regulator sees, degrees (0 when the sensor is stale) |
 | `corr` | heading correction being applied, PWM (±20 max) |
+| `pwm` | PWM on motor1..motor4 — rear right, rear left, front left, front right; 0 for a released wheel |
+| `v` | speed of motor1..motor4 in mm/s, sign follows the encoder's counting direction |
 | `age` | ms since the last sensor report |
 | `rst` | sensor resets since boot — any value above 0 is a power problem to chase |
 | `hz` | `loop()` passes per second — must stay well above 250 for the 4 ms control tick |
 
-`TELEMETRY = false` in `src/main.cpp` silences it.
+`TELEMETRY = false` in `src/main.cpp` silences it. The line is written only into
+an empty transmit buffer (128 bytes, `SERIAL_TX_BUFFER_SIZE` in
+`platformio.ini`), so `print()` never waits for the UART and `loop()` never
+stalls for it — at 9600 the longest line leaves in about 120 ms, inside the
+250 ms period.
+
+**Bluetooth module** (JY-MCU carrier with an HC-05 or HC-06): module RX ← pin 16,
+module TX → pin 17, GND ← GND, VCC ← 5 V. The competition firmware never reads
+from it, but `bt_passthrough` does. 9600 is the factory rate of both modules, so
+a new one works with no configuration: pair it on the phone (PIN `1234`, or
+`0000`), connect from a Bluetooth serial-terminal app, and the lines appear.
+
+The module is discoverable from the moment it has power, whatever the Mega is
+running: a phone that cannot find it has a module, pairing or phone problem,
+never a firmware one. Classic Bluetooth (HC-05/HC-06) is invisible to iPhones,
+which only expose BLE to apps. Connected but silent means the Mega is not
+sending (the USB monitor shows the same lines), the module RX is not on pin 16,
+or the module is not at 9600.
+
+**From a laptop (Windows)**: pair the module in Settings → Bluetooth & devices
+(PIN `1234`). Windows then creates two virtual COM ports for it, listed under
+Settings → Bluetooth & devices → Devices → More Bluetooth settings → COM Ports;
+use the one marked **Outgoing**. Open it with the PlatformIO monitor from the
+PlatformIO terminal:
+
+```
+pio device monitor -p COM5 -b 9600
+```
+
+`pio device list` shows the port numbers. Opening the port is what makes the
+laptop connect — the module's LED goes solid a second or two later. The module
+accepts one connection at a time, so disconnect the phone app first. The `-b`
+value is ignored on a Bluetooth port (the real rate is on the wire between the
+Mega and the module); the toolbar monitor button keeps opening the USB port.
+
+`bt_passthrough` is the bench tool for the module itself. Flash it and open its
+monitor: it probes the module with `AT` at boot and says whether it answered,
+which alone confirms power, wiring and rate; then anything you type is sent as
+an AT command. `MODULE_BAUD` and `LINE_ENDING` at the top of
+[`src/test/bt_passthrough.cpp`](src/test/bt_passthrough.cpp) select HC-06 (9600,
+no line ending) or HC-05 in AT mode (38400, CR+LF); the file header lists the
+commands for each — rename (`AT+NAMExxx`), PIN (`AT+PIN1234`), or a faster rate
+(`AT+BAUD8` = 115200, after which `BLUETOOTH_BAUD` must be changed to match).
 
 ### First run checklist
 

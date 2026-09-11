@@ -44,6 +44,12 @@ class Move {
     // initHardware() (e.g. move.regulator.cruisePWM = 232).
     WheelRegulator regulator;
 
+    // PWM currently driving motor1..motor4; 0 for a wheel that is released.
+    // Updated on every regulated tick and by rotateCW()/rotateCCW(), cleared by
+    // stop() and stopForMillis(). Read only by the telemetry line in main.cpp;
+    // nothing in here reads it back.
+    int wheelPWM[WheelRegulator::WHEEL_COUNT] = {0, 0, 0, 0};
+
     // enc1..enc4 belong to motor1..motor4. Distance and completion come from
     // the front pair (motors 3 and 4); the rear pair takes part in wheel sync.
     Move(AF_DCMotor& m1, AF_DCMotor& m2, AF_DCMotor& m3, AF_DCMotor& m4,
@@ -240,18 +246,12 @@ class Move {
     // rotateCCW() - see Heading.h.
     void rotateCW(int pwm, int pwm2, int pwm3, int pwm4) {
       setMotors(BACKWARD, FORWARD, FORWARD, BACKWARD);
-      motor1.setSpeed(pwm);
-      motor2.setSpeed(pwm2);
-      motor3.setSpeed(pwm3);
-      motor4.setSpeed(pwm4);
+      setSpeeds(pwm, pwm2, pwm3, pwm4);
       moving = false;
     }
     void rotateCCW(int pwm, int pwm2, int pwm3, int pwm4) {
       setMotors(FORWARD, BACKWARD, BACKWARD, FORWARD);
-      motor1.setSpeed(pwm);
-      motor2.setSpeed(pwm2);
-      motor3.setSpeed(pwm3);
-      motor4.setSpeed(pwm4);
+      setSpeeds(pwm, pwm2, pwm3, pwm4);
       moving = false;
     }
 
@@ -260,6 +260,7 @@ class Move {
     // Releases all four motors (coast).
     void stop() {
       setMotors(RELEASE, RELEASE, RELEASE, RELEASE);
+      clearWheelPWM();
       moving = false;
     }
 
@@ -271,6 +272,7 @@ class Move {
 
       if (!stopping) {
         setMotors(RELEASE, RELEASE, RELEASE, RELEASE);
+        clearWheelPWM();
         moving = false;
         startTime = millis();
         stopping = true;
@@ -355,6 +357,19 @@ class Move {
       motor4.run(m4);
     }
 
+    // Writes one PWM per motor and records it in wheelPWM.
+    void setSpeeds(int p1, int p2, int p3, int p4) {
+      wheelPWM[0] = p1; wheelPWM[1] = p2; wheelPWM[2] = p3; wheelPWM[3] = p4;
+      motor1.setSpeed(p1);
+      motor2.setSpeed(p2);
+      motor3.setSpeed(p3);
+      motor4.setSpeed(p4);
+    }
+
+    void clearWheelPWM() {
+      for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) wheelPWM[i] = 0;
+    }
+
     // Turns the four requested PWM values into per-wheel TRIMS: how much each
     // wheel differs from the mean of the four. The regulator applies the trims
     // around its own cruisePWM, so the measured per-motor differences in
@@ -420,12 +435,17 @@ class Move {
 
       regulator.update(participating, progress, dirSign);
       applyRegulatedSpeeds();
+
+      // A released wheel still has a PWM in its register but is coasting.
+      for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
+        if (dirs[i] == RELEASE) wheelPWM[i] = 0;
+      }
     }
 
     void applyRegulatedSpeeds() {
-      motor1.setSpeed(regulator.pwmFor(0, trim[0]));
-      motor2.setSpeed(regulator.pwmFor(1, trim[1]));
-      motor3.setSpeed(regulator.pwmFor(2, trim[2]));
-      motor4.setSpeed(regulator.pwmFor(3, trim[3]));
+      setSpeeds(regulator.pwmFor(0, trim[0]),
+                regulator.pwmFor(1, trim[1]),
+                regulator.pwmFor(2, trim[2]),
+                regulator.pwmFor(3, trim[3]));
     }
 };

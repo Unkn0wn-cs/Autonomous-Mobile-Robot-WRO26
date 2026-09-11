@@ -15,19 +15,22 @@
 //   prints a verdict after every turn; if it says FLIP, change HEADING_SIGN in
 //   Heading.cpp.
 //
-// Two reference points are kept, because two parts of the firmware need
+// Three reference points are kept, because three parts of the firmware need
 // different ones:
 //   TARGET  captured at the start of every straight or strafe by move.h, so the
 //           regulator can hold the heading that move began on.
 //   ZERO    set when the back microswitch confirms the robot is square against
 //           a wall, so routines 7 and 8 can turn a known angle away from it.
+//   BOOT    the heading at power-on. Only the telemetry line reads it, to show
+//           how far the robot has turned since it was switched on.
 //
 // FAIL-SAFES:
 //   * no report for 100 ms  -> headingError() returns 0 (heading hold idles)
 //   * no report for 1000 ms -> headingAvailable() returns false (routines 7/8
 //                              fall back to encoder-counted turns)
-//   * sensor reset          -> its reference frame is new, so both references
-//                              are re-captured from the first report after it
+//   * sensor reset          -> its reference frame is new, so all three
+//                              references are re-captured from the first
+//                              report after it
 //   * I2C bus stuck         -> Wire times out and resets the bus instead of
 //                              hanging the firmware
 
@@ -60,3 +63,6 @@ float headingError();          // degrees from target, -180..+180, 0 when stale
 // Routine-layer reference: the heading when the robot last squared on a wall.
 void  headingZero();
 float headingSinceZero();      // degrees from zero, -180..+180
+
+// Telemetry reference: the heading at power-on.
+float headingSinceBoot();      // degrees from boot, -180..+180, 0 when stale
