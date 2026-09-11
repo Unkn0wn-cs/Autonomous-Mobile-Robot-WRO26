@@ -9,7 +9,7 @@
 //   routine 4     main lane loop
 //   routine 5     diagonal lane
 //   routine 6     return, then camera weighting picks the next lane
-//   routine 7     corner checking reset, rotates on the gyro
+//   routine 7     corner checking reset, rotates on the heading sensor
 //   routine 8     reorient to 0 degrees, then falls through into routine 9
 //   routine 9     parking / Pixy ball tracking
 //   routine 10    debugging
@@ -42,10 +42,9 @@ extern int connections;
 
 // Millis at the end of setup().
 //
-// KNOWN BUG, PRESERVED DELIBERATELY: this is an `int`, which is 16 bits on AVR,
-// so it truncates millis() and wraps every 32.767 seconds. It is currently only
-// read by the disabled endgame timing block, so it does no harm today. If that
-// block is ever re-enabled, this must become unsigned long first.
+// KNOWN: an `int`, 16 bits on AVR, so it truncates millis() and wraps every
+// 32.767 seconds. Only read by the disabled endgame timing block. It must
+// become unsigned long before that block is re-enabled.
 extern int startTime;
 
 // ---------------------------------------------------------------------------
@@ -54,7 +53,6 @@ extern int startTime;
 
 const int NUM_FRANJAS = 3;
 extern int pesos[NUM_FRANJAS];  // accumulated orange blob area per franja
-extern int camera;              // UNUSED. Written in routine 6, never read.
 
 // ---------------------------------------------------------------------------
 // Endgame timing flags.
@@ -66,8 +64,8 @@ extern int camera;              // UNUSED. Written in routine 6, never read.
 //     gated on `lastRoutine || midRoutine`
 //   * routine 10 is UNREACHABLE - it is only entered from routine 9
 //
-// Both routines are kept intact so the timing block can simply be uncommented
-// to bring the endgame behaviour back.
+// Both routines and the timing block are kept so the endgame behaviour can be
+// re-enabled by uncommenting it.
 // ---------------------------------------------------------------------------
 
 extern bool lastRoutine;

@@ -1,559 +1,330 @@
-# Movement System — Architecture & Maintenance Guide
+# Movement System — hardware map, drive layer, heading, tuning
 
-Team Outer Heaven · WRO 2026 · `Estrategia_panama_2025`
-
-This document explains how the whole firmware fits together, so that changes can
-be made later without breaking something three layers away. It is split into:
-
-1. [Hardware map](#1-hardware-map) — every pin, verified against the libraries
-2. [Which robot am I building?](#2-which-robot-am-i-building)
-3. [Project layout & layer architecture](#3-project-layout--layer-architecture)
-4. [The movement stack](#4-the-movement-stack)
-5. [What changed in the 2026 redesign](#5-what-changed-in-the-2026-redesign)
-6. [Behaviour changes that need field retesting](#6-behaviour-changes-that-need-field-retesting)
-7. [Tuning the regulator](#7-tuning-the-regulator)
-8. [The rest of the system](#8-the-rest-of-the-system)
-9. [Rules for changing this code safely](#9-rules-for-changing-this-code-safely)
-10. [Known weak points and open questions](#10-known-weak-points-and-open-questions)
-11. [Restructure verification](#11-restructure-verification)
+How the robot moves: what is wired where, what `Move` and `WheelRegulator`
+do on every pass of `loop()`, how the BNO08x is used, and which numbers to
+change for which symptom. Strategy and the game are in
+[README.md](../../README.md).
 
 ---
 
 ## 1. Hardware map
 
-Arduino Mega 2560 + Adafruit Motor Shield **v1** (L293D + 74HCT595 shift register).
-
-Every pin below was read out of the libraries rather than assumed. **Before using
-any "free" pin, check it against this table.**
-
-| Pin(s) | Used by | Notes |
-|---|---|---|
-| 3, 5, 6, 11 | Motor PWM (AFMotor) | M2=3, M4=5, M3=6, M1=11 |
-| 4, 7, 8, 12 | Shield shift register | CLK=4, ENABLE=7, DATA=8, LATCH=12 |
-| 9 | Rotor L293D enable | `analogWrite`, speed of the shooter/storer |
-| 10 | Servo (gate) | `myservo.attach(10)` |
-| 14 | Start switch | `INPUT_PULLUP`, LEFT robot only |
-| 18, 19 | Back / side microswitches | `INPUT_PULLUP`, **polled, not interrupts** |
-| 20, 21 | I2C (SDA/SCL) | MPU6050 gyro |
-| 34 | Debug LED | |
-| 46, 48 | Rotor L293D input4 / input3 | direction, fixed in `setup()` |
-| 50–53 | SPI | Pixy2 (MISO/MOSI/SCK/SS; `SS`=53 on Mega) |
-| A8–A15 | 4 quadrature encoders | **PORTK is now completely full** |
-
 ### Motor and wheel layout
 
-Viewed from above, front of robot pointing up:
+Four 60 mm 45° omni wheels on a 200 × 200 mm base, Adafruit Motor Shield v1
+(L293D, 12 V). Seen from above, front of the robot pointing up:
 
 ```
         FRONT
-   motor3     motor4      <- front pair, these two measure distance
-   motor2     motor1      <- rear pair, added 2026 for synchronisation
+   motor3   motor4      front pair: measure distance, decide when a move ends
+   motor2   motor1      rear pair:  wheel synchronisation only
         BACK
 ```
 
-### Encoder assignment
+Direction patterns (motor1..motor4):
 
-| Object | Pins | Motor | Position | Role |
+| Move | m1 | m2 | m3 | m4 |
 |---|---|---|---|---|
-| `encoderLeft` | A15, A14 | motor3 | front left | **distance + completion** |
-| `encoderRight` | A13, A12 | motor4 | front right | **distance + completion** |
-| `encoderRearRight` | A11, A10 | motor1 | rear right | synchronisation only |
-| `encoderRearLeft` | A9, A8 | motor2 | rear left | synchronisation only |
+| forward / forwardp / forwardq | F | F | F | F |
+| backward / backwardp | B | B | B | B |
+| left (strafe) | B | F | B | F |
+| right (strafe) | F | B | F | B |
+| forwardLeft | – | F | – | F |
+| forwardRight | F | – | F | – |
+| backwardLeft | B | – | B | – |
+| backwardRight | – | B | – | B |
+| `rotate(x, true)`, `rotateCCW()` | F | B | B | F |
+| `rotate(x, false)`, `rotateCW()` | B | F | F | B |
 
-All four pin pairs are **confirmed by the author**. They are declared in
-`src/Hardware.cpp`, and their declaration order is significant — see below.
+Steering and strafing are done by these direction patterns. The regulator only
+ever adds small PWM differences on top of a pattern.
 
-### Timer usage — the silent killer
+### Encoders
 
-On the Mega, AFMotor claims three 16-bit timers. Anything else that grabs one of
-these will kill motor PWM without any compile error:
+One quadrature encoder per motor, all on PORTK (`A8`–`A15`):
 
-| Timer | Owner | Consequence if stolen |
-|---|---|---|
-| Timer0 | `millis()` / `delay()` | AFMotor does **not** touch it on Mega (it does on Uno) |
-| Timer1 | motor1 PWM (OC1A) | motor1 stops responding to `setSpeed` |
-| Timer2 | `analogWrite(9)` — rotor | rotor speed control dies |
-| Timer3 | motor2 (OC3C) + motor4 (OC3A) | two wheels stop responding |
-| Timer4 | motor3 PWM (OC4A) | motor3 stops responding |
-| Timer5 | Servo library | gate servo dies |
+| Object | Pins | Motor | Role |
+|---|---|---|---|
+| `encoderLeft` | A15, A14 | motor3, front left | distance + sync |
+| `encoderRight` | A13, A12 | motor4, front right | distance + sync |
+| `encoderRearRight` | A11, A10 | motor1, rear right | sync |
+| `encoderRearLeft` | A9, A8 | motor2, rear left | sync |
 
-The Servo library on Mega allocates **Timer5 first**, then Timer1, Timer3, Timer4,
-at 12 servos per timer. One servo is attached, so only Timer5 is used and nothing
-collides. **If you ever attach a 13th servo it will take Timer1 and silently break
-motor1.**
+The `Encoders` constructor takes its interrupt slot from a **static counter**,
+so the declaration order in `Hardware.cpp` decides which slot each object gets.
+All four are declared in that file, in that order, and must stay there.
 
-### Encoder interrupts
+`pulses` (RobotConfig) is counts per wheel revolution: 900 on LEFT, 1650 on
+RIGHT. With the 60 mm wheel that is 4.775 counts/mm (LEFT) and 8.754 counts/mm
+(RIGHT). `mm()` in `Motion.cpp` does the conversion; some routine call sites
+pass raw counts instead (`forward(80)`, `backward(600)`, `outer(750)`,
+`inner(180)`).
 
-`QuadratureEncoder` uses the `EnableInterrupt` library with pin-change interrupts.
-All four encoder pairs live on PORTK (A8–A15). `MAX_NUM_ENCODERS` is **4**, and all
-four slots are now used — there is no room for a fifth encoder without editing
-`lib/QuadratureEncoder/QuadratureEncoder.h`.
+### Other pins
 
-`Encoders` assigns its interrupt slot from a **static counter incremented in the
-constructor**, so *declaration order in `main.cpp` determines which slot each
-encoder gets*. Do not reorder those four declarations casually.
+| Pin | Use |
+|---|---|
+| 3, 5, 6, 11 | motor PWM (AFMotor: M2=3, M4=5, M3=6, M1=11) |
+| 4, 7, 8, 12 | motor shield shift register (CLK, ENABLE, DATA, LATCH) |
+| 9 | rotor L293D enable (`analogWrite`, Timer2) |
+| 10 | gate servo (Servo library, Timer5) |
+| 14 | start switch |
+| 18, 19 | back / side microswitches (polled) |
+| 20, 21 | I2C: BNO08x |
+| 34 | debug LED |
+| 46, 48 | rotor L293D input4 / input3 |
+| 50–53 | SPI: Pixy2 (SS = 53) |
+
+### Timers
+
+| Timer | Owner |
+|---|---|
+| Timer1 | motor1 PWM |
+| Timer2 | `analogWrite(9)`, the rotor |
+| Timer3 | motor2 + motor4 PWM |
+| Timer4 | motor3 PWM |
+| Timer5 | Servo library |
+
+The Servo library allocates Timer5 first, then Timer1/3/4 at 12 servos each.
+Attaching a 13th servo would take Timer1 and silently kill motor1.
 
 ---
 
 ## 2. Which robot am I building?
 
-Both robots share one firmware. Selection is by **commenting / uncommenting**
-one of two config blocks — now in a file that exists purely for that purpose:
+Exactly one block in `src/RobotConfig.cpp` is uncommented. Everything that
+differs between the robots lives there: `pwmf`, `pwms`, `pulses`, `robotSide`,
+`slowRotorSpeed`, `closedGate`, `openGate`. `lenght` is defined outside both
+blocks and assigned in `setup()`.
 
-```
-src/RobotConfig.cpp
-  //LEFT  - WALL    [ACTIVE]
-  //RIGHT - RAMP    [INACTIVE]
-```
+`robotSide` is the master switch: the routines mirror left/right decisions on
+it, and `inner()` / `outer()` translate "towards the centre wall" into a
+physical strafe direction per robot.
 
-Exactly one block must be active. Both active will not compile (duplicate
-definitions); both commented out will not link (undefined references).
+---
 
-> **Fixed during the restructure:** `lenght` used to be declared *inside the LEFT
-> block only*, which meant the RIGHT configuration did not compile at all. It now
-> sits outside both blocks. Both configurations have been build-verified.
+## 3. The drive layer: `Move` (`lib/move/move.h`)
 
-What differs between them:
+### The non-blocking contract
 
-| Symbol | LEFT (wall) | RIGHT (ramp) | Meaning |
+Every distance-counted primitive is called every pass of `loop()` and returns
+`true` once, when the move has finished. On the first call it arms itself
+(`armMotion`): records which motion and target it is, zeroes all four wheel
+start counts, arms the regulator, captures the heading target (translations
+only), and stamps `moveStartTime`. Every call after that re-asserts the motor
+directions and the regulated PWM for this instant (`runSynchronised`).
+
+If a routine switches to a different motion or target while one is running
+(a microswitch advanced `state`), the next call re-arms from the current
+counts.
+
+### Primitives
+
+| Primitive | Mode | Heading hold | Completion |
 |---|---|---|---|
-| `pwmf[4]` | 245,243,243,245 | 230,243,243,230 | forward/backward PWM per motor |
-| `pwms[4]` | 220,225,220,225 | 200,200,200,200 | strafe/diagonal PWM per motor |
-| `pulses` | 900 | 1650 | fed to `mmToPulses` as counts/revolution |
-| `robotSide` | `LEFT` | `RIGHT` | flips nearly every left/right decision |
-| `slowRotorSpeed` | 90 | 180 | rotor PWM in "slow" mode |
-| `closedGate` / `openGate` | 170 / 55 | 96 / 0 | servo angles |
+| `forward`, `backward`, `left`, `right` | Full | yes | front encoder ≥ target, or timeout |
+| `forwardRegulated` | Full | yes | returns 1 at target, 2 at 14/22 of it |
+| `forwardp`, `backwardp`, `forwardq` | Ramp | no | as above (`forwardp` also returns 2 at 14/22) |
+| `forwardLeft`, `forwardRight`, `backwardLeft`, `backwardRight` | Ramp | no | front encoder ≥ target, or timeout |
+| `rotate` | Full, hold off | no | front encoder ≥ target, or timeout |
+| `rotateCW`, `rotateCCW` | none | no | caller stops it (routines 7/8 use the sensor) |
+| `stop` | – | – | releases all four motors |
+| `stopForMillis` | – | – | releases, returns true after the delay (one shared timer) |
 
-`lenght` is set in `setup()`, not in the block: **1100** for LEFT, **640** for
-RIGHT. It is the length of the main straight in mm.
+`forwardp` / `backwardp` / `forwardq` trim one diagonal pair by ±9 / ±6 / ±9 so
+the robot presses against the wall it runs along; the wall does the aligning,
+so they run without wheel sync or heading hold.
 
-`robotSide` is the master switch. It is read in `inner()`, `outer()`, and in most
-routine cases to mirror the whole strategy. **Any new directional logic must
-branch on it.**
+### Distance, completion, timeout
+
+Completion is measured on the **front pair only**: either `encoderLeft` or
+`encoderRight` reaching the target count ends the move. `moveTimeoutMs = 4000`
+is a hard cap on every counted primitive, rotations included: a move that has
+not reached its count in 4 s (usually because it is pressed against a wall, or
+a wheel is blocked) is stopped and reported as done.
+
+### PWM trims
+
+`pwmf[]` / `pwms[]` are not sent to the motors as absolute values. `Move`
+turns the four numbers a motion asks for into trims (`setNominalSpeeds`):
+`trim[i] = n[i] − mean(n)`. The regulator adds each trim to its own
+`cruisePWM`. `{220, 243, 243, 220}` therefore means "wheels 2 and 3 run 23
+counts above wheels 1 and 4"; raising all four by the same amount changes
+nothing.
 
 ---
 
-## 3. Project layout & layer architecture
+## 4. The regulator: `WheelRegulator` (`lib/move/WheelRegulator.h`)
 
-The firmware was one 1170-line `main.cpp`. It is now split by responsibility.
-**No logic changed in that split** — see [section 11](#11-restructure-verification)
-for the proof.
+Three loops, each on its own sensor. All parameters are members, set in
+`initHardware()` (`src/Hardware.cpp`) or at their defaults in the header.
 
-| File | Owns |
+### Modes
+
+| Mode | Ramp | Wheel sync | Heading hold | Used by |
+|---|---|---|---|---|
+| Burst | no — straight to cruise | no | no | any move shorter than 120 mm |
+| Ramp | yes | no | no | wall-hugging straights, diagonals |
+| Full | yes | yes | yes (translations) | forward/backward/left/right, rotate (hold off) |
+
+### The PWM band
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `minMovePWM` | 200 | wheels do not turn below this; every output is clamped to it |
+| `maxPWM` | 255 | ceiling |
+| `rampStartPWM` | 205 | where a ramp begins |
+| `cruisePWM` | 232 | regulated cruise; `base_i = cruisePWM + trim_i` |
+
+Authority with the RIGHT robot's trims (bases 221 / 244 / 244 / 221): a
+correction that raises wheels 1 and 4 has 34 counts of room, one that raises
+wheels 2 and 3 has 11 before clamping at 255. The regulator clamps per wheel,
+so in the second direction a ±20 request comes out as +11 / −20.
+
+### 1. Speed shaping (encoders)
+
+`profile = min(smoothstep(travelled / ramp), smoothstep(remaining / ramp))`,
+where `travelled` is the furthest driven wheel. The PWM for wheel *i* is
+`rampStartPWM + (base_i − rampStartPWM) · profile`. The ramp length is 22 % of
+the move (`rampFraction`), clamped to 25–220 mm and to 45 % of the move, so the
+profile is a function of **position**: deceleration always starts at a known
+distance from the target.
+
+### 2. Wheel synchronisation (encoders)
+
+For every driven wheel, `sync_i = kSync · (mean − progress_i)`, clamped to
+±`maxSyncCorrection` (0.30 PWM/count, ±12 PWM). Deviations are measured against
+the **mean** of the driven wheels, so corrections sum to zero and cannot change
+the robot's overall speed.
+
+With heading hold on, the rotation component is projected out of `sync[]`:
+`dot = mean_i(sync_i · ROT_i · dirSign_i)`, then `sync_i −= dot · ROT_i · dirSign_i`
+with `ROT = {+1, −1, −1, +1}`. Rotation is left entirely to the heading loop,
+which measures it; the sync loop equalises the wheels in every other direction.
+
+### 3. Heading hold (BNO08x)
+
+Runs in Full mode for translations, every `updateIntervalMs = 4` ms with a
+measured `dt`:
+
+| Parameter | Value |
 |---|---|
-| `src/main.cpp` | `setup()` and `loop()` only. Wires the modules together. |
-| `src/RobotConfig.h/.cpp` | **The robot selector.** Enums and per-robot tuned values. |
-| `src/Hardware.h/.cpp` | Pins, motors, encoders, `Move`, servo, rotor, LED. |
-| `src/Sensors.h/.cpp` | Gyro, Pixy2, I2C bus, microswitch state. |
-| `src/Motion.h/.cpp` | `mm()`, `inner()`, `outer()` — strategy-level movement. |
-| `src/Routines.h/.cpp` | The routine/state machine and camera lane weighting. |
-| `lib/move/move.h` | `Move` — the motion primitives. |
-| `lib/move/WheelRegulator.h` | Ramp shaping and four-wheel synchronisation. |
+| `kHeadingP` | 9.0 PWM/deg |
+| `kHeadingI` | 0 (proportional-only while P is being observed; start at 3.0 when enabling) |
+| `kHeadingD` | 0 (start at 0.6 when enabling; derivative is low-passed 0.7/0.3) |
+| `headingDeadbandDeg` | 0.12° — only the P term sees it; I and D see the raw error |
+| `maxHeadingCorrection` | ±20 PWM; integral frozen while saturated |
+| `headingIntegralLimit` | ±8 PWM |
 
-Dependency direction is strictly one way — nothing lower ever includes something
-higher:
+An error jump of more than 30° between two ticks is treated as a sensor
+re-reference (reset, or a stale read returning): D and I restart from there.
 
-```
-main.cpp
-  ├─ handleMicroSwitches()   Routines   ── switch edges → state++
-  ├─ updateEndgameTiming()   Routines   ── disabled, see §8
-  ├─ updateGyro()            Sensors    ── heading → ang_z
-  └─ runRoutines()           Routines   ── MUST BE LAST
-        │
-        │  switch(routine) → switch(state) → move.<primitive>(...)
-        ▼
-   Motion (mm / inner / outer)
-        │
-        ▼
-   move.h  (class Move)
-     armMotion()       decides "is this a new move?"
-     runSynchronised() drives motors + applies regulation
-     checkDone*()      decides "am I there yet?"
-        │                        │
-        ▼                        ▼
-  WheelRegulator.h        encoderLeft / encoderRight
-  (ramp + wheel sync)     (front pair = ground truth)
-        │
-        ▼
-   AFMotor (L293D shield)
-```
+The correction is a rotation superimposed on the translation:
+`pwm_i = ramped_i + sync_i + corr · ROT_i · dirSign_i`, clamped to the band.
+`dirSign` is +1 for a wheel commanded forward, −1 backward, 0 released, so the
+same `corr` turns the robot the same way whether it is driving forward,
+backward or strafing.
 
-**Why `runRoutines()` must be the last call in `loop()`:** routine 4 state 5
-contains a bare `return` for the LEFT robot on the INNER lane, which is expected
-to skip everything that would have followed it. Adding a call after it silently
-changes behaviour.
-
-**The single most important structural fact:** the routines never talk to motors
-or encoders directly. They only call `Move` methods, and every `Move` method is
-non-blocking — it is called *repeatedly* from `loop()` and returns "done yet?"
-This is why `loop()` must never block.
+Positive `corr` drives the `F B B F` pattern (wheels 1 and 4 up, 2 and 3
+down) — the `rotateCCW()` direction. The sign convention in `Heading.h` makes
+the heading reading **decrease** under that pattern, so a positive error is
+corrected by a positive `corr`.
 
 ---
 
-## 4. The movement stack
+## 5. Heading: `src/Heading.*`
 
-### 4.1 The non-blocking contract
+### Sensor
 
-Every motion primitive follows the same pattern:
+BNO08x, horizontal, chip side up, I2C (tries 0x4A then 0x4B). Report:
+`SH2_GAME_ROTATION_VECTOR` (accelerometer + gyroscope, no magnetometer, so the
+motors cannot disturb it; heading is relative to power-on). Yaw is taken from
+the quaternion with `atan2(2(ij + kr), i² − j² − k² + r²)`.
 
-```cpp
-case 2:
-  if (move.forward(mm(505))) state++;   // called every loop until it returns true
-  break;
-```
-
-- **First call** — `armMotion()` records start counts, sets nominal PWM, arms the
-  acceleration profile, stamps `moveStartTime`.
-- **Every call** — motors are re-commanded and regulated PWM is re-asserted.
-- **Final call** — the target is reached (or the timeout fires), `stop()` is
-  called, `moving` goes false, and `true` is returned exactly once.
-
-Return conventions differ and **must be preserved**:
-
-| Method | Returns | Meaning |
+| Setting | Value | Where |
 |---|---|---|
-| `forward`, `backward`, `left`, `right`, `rotate`, diagonals, `forwardq`, `backwardp` | `bool` | true = finished |
-| `forwardp`, `forwardRegulated` | `int` | `0`=running, `1`=finished, `2`=passed the "far" threshold (14/22 of the way) |
+| I2C clock | 400 kHz, set after `begin_I2C()` (the driver's own `Wire.begin()` would reset it to 100 kHz) | `I2C_CLOCK_HZ` |
+| I2C timeout | 10 ms, bus reset on timeout | `I2C_TIMEOUT_US` |
+| Report interval requested | 2.5 ms (400 Hz); `heading_test` prints the delivered rate | `REPORT_INTERVAL_US` |
+| Poll gate | 2 ms | `POLL_INTERVAL_MS` |
+| Control tick | 4 ms | `WheelRegulator::updateIntervalMs` |
 
-Return code `2` is what triggers `enableSlowDrivers()` mid-move so the rotor slows
-before arriving. Losing it would break routines 4 and 7.
+Worst-case latency from a heading change to the first PWM response:
+2.5 + 2 + 4 = 8.5 ms.
 
-### 4.2 Distance measurement — unchanged, and deliberately so
+`headingUpdate()` is called from `loop()` and also from the regulator's heading
+hook (`regulatorHeadingError()` in `Hardware.cpp`), so a move keeps getting
+fresh readings even inside code that does not return to `loop()` between
+passes (routine 9's `while (true)` strafes).
 
-Distance and completion are measured **only** on the two front encoders
-(`encoderLeft` / `encoderRight`), using `abs()` of the delta, and completing when
-**either** one reaches the target (`||`, not `&&`).
+### References
 
-This is exactly how it worked before 2026, and it was kept that way on purpose:
-**every distance already tuned into the routines keeps its meaning.** The two new
-rear encoders feed synchronisation only and never influence when a move ends.
+| Reference | Set by | Read by |
+|---|---|---|
+| **target** | `armMotion()` at the start of every translation | `headingError()` → regulator |
+| **zero** | `onSwitchPress()` — back microswitch, robot square on the wall | `headingSinceZero()` → routines 7/8 |
 
-`checkDoneWithTimeout()` also enforces `moveTimeoutMs` (4000 ms), which stops the
-move regardless. Any move that legitimately takes longer than 4 s will be cut
-short — worth remembering when adding long moves.
+A rotation captures nothing; the translation after it captures the new heading.
 
-### 4.3 Unit conversion
+### Sign convention
 
-```cpp
-int mm(int millimetres)  →  move.mmToPulses(mm, diameter=60, pulses)
-```
+`HEADING_SIGN` (Heading.cpp, `−1.0f`) is applied to both `headingError()` and
+`headingSinceZero()`. It is chosen so that the reading **increases** under the
+`rotateCW()` pattern (`B F F B`) and **decreases** under `rotateCCW()`
+(`F B B F`). Two things depend on exactly that:
 
-`pulses` (900 or 1650) is passed as *pulses per wheel revolution*, with a 60 mm
-wheel (188.5 mm circumference). So LEFT ≈ 4.77 counts/mm, RIGHT ≈ 8.75 counts/mm.
+- routines 7/8: `reading ≥ alpha + beta → rotateCCW()`, `reading ≤ alpha − beta
+  → rotateCW()` — converges only if rotateCCW lowers the reading;
+- the regulator: positive `corr` = the `F B B F` direction, must lower a
+  positive error.
 
-> ⚠️ Not every call is wrapped in `mm()`. Several pass **raw encoder counts**:
-> `move.forward(80)`, `move.backward(20)`, `move.backward(600)` (routines 5 and 7),
-> and `outer(750)` / `outer(30)` / `inner(180)` pass raw numbers into helpers that
-> then wrap them again. Read carefully before "fixing" a number — some of these are
-> raw counts and some are millimetres, and the distinction is not obvious.
+`square_test` measures each turn against the pattern it used and prints
+`SIGN: OK` or `SIGN: FLIP HEADING_SIGN in Heading.cpp`.
 
-### 4.4 WheelRegulator — how synchronisation works
+### Fail-safes
 
-The whole design rests on one geometric fact about this drivetrain:
-
-> For **every** motion this robot performs — forward, backward, strafe, rotate and
-> the two-wheel diagonals — each *participating* wheel is supposed to turn through
-> the **same number of encoder counts**.
-
-So keeping the robot straight and smooth reduces to one rule: **make every driven
-wheel travel the same distance.** Two consequences worth understanding:
-
-- Because only *magnitude* matters, the regulator compares `abs(delta)`. It
-  therefore **does not care which way round any encoder's A/B pair was wired** —
-  no polarity calibration is needed, ever.
-- Wheels commanded `RELEASE` (the two idle wheels in a diagonal) are excluded from
-  the comparison, as are wheels with no encoder.
-
-**Correction is downward only.** The reference is the *slowest* driven wheel; any
-wheel ahead of it has its PWM trimmed down in proportion to how far ahead it is.
-No wheel is ever driven above its nominal PWM. This is not a stylistic choice —
-nominal PWM is already 243–245 out of 255, so there is no headroom to speed a
-lagging wheel up. Trimming down can never saturate.
-
-**Acceleration** is a trapezoid applied to nominal PWM, measured in *encoder
-counts* rather than milliseconds, so it behaves identically no matter how fast
-`loop()` happens to be running. A move too short to reach full speed collapses
-into a triangle automatically, with no special case.
-
-Safety behaviour worth knowing: if an encoder ever fails and reads zero, every
-other wheel appears infinitely far ahead. `maxTrim` caps the damage — the robot
-crawls rather than stopping dead, and the 4 s timeout still ends the move.
-
-### 4.5 Methods that are NOT regulated
-
-Deliberately left open-loop; do not assume everything is smooth:
-
-- `simpleForward/Backward/Left/Right` — no encoders, no target, run until stopped
-- `rotateCW` / `rotateCCW` — used with **gyro** feedback in routines 7 and 8, not
-  encoder feedback. They set `moving = false` on every call by design.
-- `forwarda` — superseded by the regulator's ramp. Unused. Its `static` variables
-  are never reset between moves, so it is buggy; do not adopt it.
-- `accelerateToPWM` — unused, also `static`-based.
-
----
-
-## 5. What changed in the 2026 redesign
-
-### New file: `lib/move/WheelRegulator.h`
-
-Self-contained, no dependencies beyond `Arduino.h`. Holds the acceleration profile
-and the per-wheel trim calculation. Owns no hardware — `Move` feeds it progress
-numbers and asks it what PWM to use.
-
-### `lib/move/move.h`
-
-- **Added a four-encoder constructor.** The original two-encoder constructor still
-  exists and still works — with it you still get acceleration ramps and front-axle
-  synchronisation, just not rear-wheel sync.
-- **Added `armMotion()`** — centralises "is this a new move or a continuation?".
-- **Added `runSynchronised()`** — replaces the bare `setMotors()` call in every
-  primitive; commands directions, gathers all four encoder deltas, updates the
-  regulator, re-asserts regulated PWM.
-- **`startMove(long target)`** now also zeroes all four wheel counters and arms the
-  profile. The parameter defaults to 0, so old call sites still compile.
-- **Every public method kept its exact name, signature and return semantics.**
-  This is why all eleven routines were converted without editing the state machine
-  at all.
-
-### `src/main.cpp`
-
-- Two rear `Encoders` objects declared; `Move` switched to the 4-encoder
-  constructor (lines 58–71).
-- `i2cDeviceCount` global added.
-- **The I2C bus scan moved out of `loop()` into `setup()`.** It previously probed
-  all 126 addresses on *every single pass*, which made the control period both long
-  and wildly irregular. A regulator cannot be tuned against a loop whose period
-  keeps changing. `loop()` now reads the stored count; all downstream logic
-  (`devices > 0` → read gyro, else `mpu = false`) is untouched.
-
----
-
-## 6. Behaviour changes that need field retesting
-
-These are real, intended, and will be visible on the field. **Do not assume the
-robot is broken when it behaves differently here.**
-
-### 6.1 Distances will come out shorter than before ⚠️ biggest one
-
-The loop was previously spending roughly 100 ms per pass inside the I2C scan.
-Completion was therefore only checked every ~100 ms, and the robot overshot its
-target by up to a full loop-period of travel. Detection now happens within a
-millisecond or two, and the deceleration ramp further reduces run-on.
-
-Same encoder counts, far less overshoot ⇒ **shorter real-world distances.**
-Re-verify the tuned numbers. To temporarily restore the old stopping behaviour
-while checking, disable the ramp-down:
-
-```cpp
-move.regulator.endFactor = 255;   // in setup()
-```
-
-### 6.2 Diagonals now get their full timeout
-
-`forwardLeft`, `forwardRight`, `backwardLeft` and `backwardRight` never set
-`moveStartTime`. They inherited it from the *previous* move, so
-`checkDoneWithTimeout` was already partway through its 4 s budget before the
-diagonal even started — routine 5 case 6 was very likely cutting its diagonal
-short. These now get a full, fresh timeout and **will travel further than before.**
-
-### 6.3 Abandoned moves no longer corrupt the next move
-
-A move interrupted by a microswitch `state++` left `moving == true`. The next
-movement then skipped `startMove()` and measured from **stale start counts**,
-travelling the wrong distance. `armMotion()` now detects that the motion type or
-target changed and re-arms cleanly.
-
----
-
-## 7. Tuning the regulator
-
-All fields are public on `move.regulator` and can be set from `setup()`.
-
-| Field | Default | Raise it when | Lower it when |
-|---|---|---|---|
-| `syncGain` | 4 | robot still drifts off straight | wheels hunt / stutter |
-| `maxTrim` | 70 | — | — (safety cap; keeps a dead encoder from stalling the robot) |
-| `minPWM` | 110 | a trimmed wheel stalls instead of slowing | — |
-| `startFactor` | 145 | starts feel sluggish | starts feel jerky |
-| `endFactor` | 130 | stopping short | overshooting |
-| `accelFraction` | 64 (=25%) | want gentler starts | want snappier starts |
-| `decelFraction` | 77 (=30%) | want gentler stops | want snappier stops |
-| `maxRampCounts` | 300 | long straights should ramp over more distance | |
-| `updateIntervalMs` | 10 | — | — (changing this changes what `syncGain` means) |
-
-Fractions are in 1/256ths. Recommended order: get `syncGain` right first (drives
-straightness), then shape `accelFraction`/`decelFraction` (drives smoothness),
-then re-verify distances.
-
----
-
-## 8. The rest of the system
-
-### 8.1 Routine / state machine
-
-`loop()` runs `switch (routine)` → `switch (state)`. `routine` picks the strategy;
-`state` steps through it. Both are plain globals; transitions are just assignments.
-
-All of these live in `Routines.cpp`, inside `runRoutines()`.
-
-| Routine | Purpose |
+| Condition | Effect |
 |---|---|
-| 0–3 | Opening purple-ball handling, one per camera quadrant |
-| 4 | Main lane loop. `state` **counts down** (−1…−6) for the OUTER lane and up (0…5) for MIDDLE/INNER |
-| 5 | Diagonal lane |
-| 6 | Return + Pixy orange-ball weighting → picks next `lane` |
-| 7 | Corner reset, gyro-based rotation to ±80° |
-| 8 | Re-orient to 0°, then **falls through** into routine 9 |
-| 9 | Pixy ball tracking / parking — **currently unreachable** |
-| 10 | Debug — **currently unreachable** |
+| no report for 100 ms | `headingError()` returns 0 — heading hold idles, move continues open-loop |
+| no report for 1000 ms | `headingAvailable()` false — routines 7/8 use encoder-counted turns |
+| sensor reset (`wasReset()`) | re-subscribe; readings distrusted until the next report; **target and zero re-captured** from that report (the sensor's frame is new) |
+| I2C line stuck | `Wire` times out and resets the TWI peripheral; the read fails, `age` climbs |
+| sensor absent at boot | `headingBegin()` false; everything runs without heading hold |
 
-`selectOpeningRoutine()` chooses the opening routine by scanning up to 120 Pixy
-frames for the purple ball and classifying it into a quadrant around
-`(center_x=200, center_y=32)` → routine 0, 1, 2 or 3. If nothing is found it stays
-at the default, **routine 4**.
-
-> ⚠️ `case 8:` has **no `break`** — it deliberately falls through into `case 9:`
-> on every pass. Preserved exactly; do not add a `break` without testing.
-
-### 8.2 Lane selection
-
-`lane` (`OUTER` / `MIDDLE` / `INNER`) is the strategic variable. Routine 6 case 6
-reads the Pixy, classifies each orange blob into one of three *franjas* via
-`classifyLane()` (two diagonal boundary lines, different constants per side), sums
-blob **area** per franja, and picks the heaviest. `robotSide` then maps franja →
-lane, mirrored between the two robots. Guarded by `connections < 2` so the camera
-decision is only taken twice per run.
-
-### 8.3 Sensors
-
-- **Pixy2** — SPI. Used in `setup()` (purple ball) and routines 6 and 9 (orange
-  balls). `pixy.setLamp(0,0)` turns the lamp off.
-- **MPU6050** — I2C, gyro only, Z axis integrated into `ang_z`. Zeroed by
-  `resetGyroAngles()`, which is called on every back-microswitch press. `mpu`
-  records whether the sensor answered; routines 7 and 8 fall back to
-  encoder-counted `rotate()` when it did not.
-- **Microswitches** — despite the "For interrupt on Mega" comments, pins 18/19 are
-  **polled** in `loop()` with a 350 ms debounce window, not attached as interrupts.
-  A back-switch press zeroes the gyro **and** advances `state`. `backSwitchPressed`
-  / `sideSwitchPressed` are written but never meaningfully read.
-
-### 8.4 Rotor and gate
-
-Direction is fixed in `setup()` (`input3` HIGH, `input4` LOW); only speed varies,
-via `analogWrite(enable34, …)`:
-
-- `enableDrivers()` → 254 (full, storing)
-- `enableSlowDrivers()` → `slowRotorSpeed` (90 LEFT / 180 RIGHT)
-- `disableDrivers()` → 0
-
-The servo on pin 10 switches between `closedGate` (store) and `openGate` (shoot).
+`headingResetCount()` is printed as `rst` by the telemetry line and by
+`heading_test`. Any reset during a run re-references the heading mid-move and
+points at a supply problem.
 
 ---
 
-## 9. Rules for changing this code safely
+## 6. Tuning
 
-0. **Keep the dependency direction.** `Routines` may use `Motion`, `Sensors` and
-   `Hardware`; none of those may include `Routines`. Nothing includes `main.cpp`.
-   If you find yourself needing an upward include, the code is in the wrong module.
-1. **Never block inside `loop()`.** Every motion primitive is a state machine that
-   must be re-entered. The two `while (true) { if (move.right(...)) break; }` loops
-   in routine 9 violate this and freeze all sensing and switch handling for the
-   duration. Do not copy that pattern.
-2. **Never add `delay()` to the movement path.** It stalls regulation and switch
-   debouncing alike.
-3. **Preserve return semantics.** `forwardp` and `forwardRegulated` return `int`
-   with a meaningful `2`. Changing them to `bool` silently breaks the rotor
-   pre-slowing in routines 4 and 7.
-4. **Distances are measured on the front encoders only.** If you ever change that,
-   every tuned distance in every routine becomes invalid at once.
-5. **Branch on `robotSide` for anything directional**, and check the *other* robot's
-   config block still compiles when you touch the shared globals.
-6. **Do not reorder the four `Encoders` declarations, and do not move them out of
-   `Hardware.cpp`** — construction order assigns interrupt slots, and that order is
-   only guaranteed while all four sit in the same translation unit. `Move` is
-   constructed after them in the same file for the same reason.
-7. **Check the timer table** before using `analogWrite` on a new pin or attaching
-   another servo.
-8. **`mm()` vs raw counts** — confirm which one an existing call uses before
-   changing its number.
-9. **Adding a new motion primitive**: copy the shape of `forward()` exactly —
-   `armMotion(...)` with a *new* `MotionId`, then `runSynchronised(...)`, then
-   `checkDoneWithTimeout(...)`. A duplicated `MotionId` will defeat the re-arm
-   detection and reintroduce the stale-counts bug.
-10. **Rebuild for both robots** after touching shared code:
-    `pio run` with each config block active in turn.
+| Symptom | Change |
+|---|---|
+| Robot arcs during straights, `corr` pinned at ±20 | wrong sign — `square_test` says FLIP; set `HEADING_SIGN` |
+| Weaves / oscillates about the heading | lower `kHeadingP`; if I/D are enabled, lower `kHeadingD` first |
+| Settles with a constant small offset | enable `kHeadingI` (3.0) |
+| Twitches while already straight | raise `headingDeadbandDeg` |
+| One wheel visibly lags at start | raise `kSync` (0.30) or `maxSyncCorrection` (12) |
+| Starts with a jolt | lower `rampStartPWM` toward `minMovePWM`, or raise `rampFraction` |
+| Too slow overall | raise `cruisePWM` — but every count up removes a count of upward authority for wheels 2/3 on RIGHT (11 today) |
+| Long moves cut short | they hit `moveTimeoutMs` (4 s) — see telemetry `s` stuck then advancing at 4 s |
+| `age` climbs, `rst` counts up | drop `I2C_CLOCK_HZ` to 100000; check the sensor's supply |
+
+All regulator parameters are public members and can be set from `initHardware()`
+or a test program without touching the library.
 
 ---
 
-## 10. Known weak points and open questions
+## 7. Changing this code safely
 
-**Unresolved — needs an answer from the team:**
-
-- **Rear encoder pins are unverified placeholders** (A11/A10 and A9/A8). This is
-  the one thing blocking a real drive test.
-- **Why does `pulses` differ so much between robots** (900 vs 1650)? Different
-  gearing, or different encoder CPR? It matters if the two robots are ever meant
-  to share tuned distances.
-- **What are the `position` / `d` trims in `forwardp`, `backwardp`, `forwardq`
-  physically compensating for?** They bias one diagonal pair of motors by ±6–9 PWM.
-  They were kept untouched so nothing changed underneath, but the synchroniser now
-  does this job properly and closed-loop. Once the robot drives well, they are
-  likely redundant and can probably be set to 0 — test before removing.
-
-**Latent issues, pre-existing, not introduced by the redesign:**
-
-- Blocking `while (true)` loops in routine 9.
-- `case 8:` falls through into `case 9:` with no `break`.
-- `filterGyro()` integrates `ang_z` **and** updates `tiempo_prev`; `loop()` then
-  integrates again using a `dt` computed from the just-updated timestamp, so the
-  second integration adds nearly zero. Harmless today, confusing to read, and it
-  will bite whoever changes the gyro code.
-- `forwarda` and `accelerateToPWM` use function-level `static` state that is never
-  reset between moves. Both are unused. Prefer deleting them over fixing them.
-- `lenght` is spelled that way throughout. Renaming it is a safe, mechanical
-  change, but touches many lines.
-
-**Deliberately preserved bugs.** These are real defects, but the robot has been
-tuned around them, so "fixing" one changes how the robot drives. Each is marked
-`KNOWN` at its site in the code:
-
-| Where | What | Effect if "fixed" |
-|---|---|---|
-| Routine 4 state −2, routine 7 state 6 | `outer(mm(20))` double-converts — `outer()` calls `mm()` internally, so this is `mm(mm(20))` ≈ 453 counts, not 95 | Robot strafes ~4× less |
-| Routine 6 state 6 | `classifyLane(..., true)` is hard-coded, so LEFT uses RIGHT's boundary lines | Lane selection changes |
-| `handleMicroSwitches()` | `int currentTime = millis()` — 16-bit on AVR, wraps every 32.767 s | Switch debounce timing changes |
-| `startTime` | same 16-bit truncation; only read by the disabled timing block | none today |
-| Routine 9 / 10 | `millis() > 61000` is absolute, not `startTime + 61000` | unreachable today |
-
----
-
-## 11. Restructure verification
-
-The split from one 1170-line file into modules was verified mechanically against
-the pre-restructure commit, not by eye. Comments and whitespace were stripped and
-the remaining source compared.
-
-| Check | Method | Result |
-|---|---|---|
-| Routine state machine, 674 lines | MD5 of flattened source | **identical** |
-| `mm`, `inner`, `outer` | per-function diff | identical |
-| `testI2C`, `filterGyro`, `resetGyroAngles`, `onSwitchPress` | per-function diff | identical |
-| `classifyLane` | per-function diff | identical |
-| `enableDrivers`, `enableSlowDrivers`, `disableDrivers`, `blink` | per-function diff | identical |
-| `setup()`, 78 statements | sorted statement-set diff | identical |
-| `loop()` pre-switch | sorted statement-set diff | 3 expected lines (below) |
-| LEFT build | `pio run` | SUCCESS, RAM 1543 B — byte-identical to before |
-| RIGHT build | `pio run` | SUCCESS — **was impossible before** |
-
-**The only intentional source changes in the whole restructure:**
-
-1. `lastRoutine`, `midRoutine`, `midRoutineDone` went from `static` locals inside
-   `loop()` to file-scope globals in `Routines.cpp`, because the routines need to
-   read them. A function-level `static` and a file-scope global have identical
-   lifetime and one-time zero-initialisation — the same object, differently scoped.
-2. `lenght` moved out of the LEFT-only block so the RIGHT build compiles.
-3. The three microswitch `pinMode()` calls moved a few lines earlier, into
-   `initHardware()`. Pins 14/18/19 have no interaction with Serial, I2C or the
-   MPU6050, so their position relative to those is inert.
-
-Nothing else changed. No distance, no threshold, no conditional, no ordering.
+1. Everything in `Routines.cpp` marked `KNOWN` is behaviour the robot is tuned
+   around. Changing one means re-running the course.
+2. Distances tuned into the routines are in front-encoder counts. Keeping
+   completion on the front pair keeps them meaningful.
+3. Any new directional logic must branch on `robotSide`.
+4. Do not reorder or move the four `Encoders` declarations.
+5. Do not attach more servos or take a timer (see §1).
+6. `runRoutines()` stays the last call in `loop()`.
+7. New test programs go in `src/test/` with their own `[env:...]` in
+   `platformio.ini`; they are excluded from the competition build.

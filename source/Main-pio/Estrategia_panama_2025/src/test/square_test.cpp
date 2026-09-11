@@ -1,0 +1,222 @@
+// square_test.cpp - movement bench test. NOT the competition firmware.
+//
+// Drives a real 500 mm square: drive a side, pause, turn 90 degrees, pause,
+// four times round. setup() does not move the robot at all.
+//
+//        <------+          After four sides the robot is back where it
+//        |      ^          started, facing the way it started. Anything else
+//        v      |          is error you can measure on the floor.
+//        +------>
+//
+// Written in the same shape as the competition routines in src/Routines.cpp - a
+// switch(state) whose cases advance on `if (move.X(...))`, with
+// move.stopForMillis(mili) for the settle time. It calls the same Move, the same
+// WheelRegulator and the same BNO08x, so whatever this square does is what
+// routine 4 will do.
+//
+// BUILD AND RUN
+//   pio run -e square_test -t upload
+//   pio device monitor -e square_test        (115200 baud)
+//
+// WHAT TO WATCH
+//   heading  degrees off the heading this move started on. THE important number.
+//            It should be pushed back toward zero within a fraction of a second
+//            and stay there.
+//   corr     the differential PWM the heading loop is applying, out of +-20.
+//            Busy early in a move, quiet once it is tracking.
+//   spread   millimetres between the furthest and least travelled wheel.
+//   ramp     the speed profile, 0 % at the ends of a move and 100 % in the
+//            middle.
+//   SIGN     printed after every turn. The heading reading must move the way
+//            Heading.h says it does for the wheel pattern used. "OK" means the
+//            heading loop and routines 7/8 will turn the right way; "FLIP"
+//            means change HEADING_SIGN in Heading.cpp. Check this on the first
+//            turn - with the wrong sign the heading loop pushes the robot AWAY
+//            from straight on every side.
+//
+// SAFETY: the rotor is held OFF throughout and the gate parked closed.
+
+#include <Arduino.h>
+#include <Wire.h>   // the competition build gets this via Sensors.h, which this
+                    // test deliberately does not compile
+
+#include "RobotConfig.h"
+#include "Hardware.h"
+#include "Motion.h"
+#include "Heading.h"
+
+// ---------------------------------------------------------------------------
+// Test parameters
+// ---------------------------------------------------------------------------
+
+static const int SIDE_MM = 500;   // half a metre per side
+static const int LAPS    = 4;     // 0 = run forever
+
+// Encoder distance for a 90 degree turn: the value the routines use for a
+// quarter turn (mm(166); mm(146) for their 80 degree turns). Adjust if the
+// robot over- or under-turns.
+static const int QUARTER_TURN_MM = 166;
+
+// Which rotate() pattern the turns use: false = B F F B (the rotateCW()
+// pattern, heading reading should INCREASE), true = F B B F (rotateCCW(),
+// reading should DECREASE). Flip to run the square the other way round.
+static const bool TURN_PATTERN_FBBF = false;
+
+static const unsigned long TRACE_EVERY_MS = 250;
+
+// ---------------------------------------------------------------------------
+// State, in the same style as Routines.cpp
+// ---------------------------------------------------------------------------
+
+static int state = 0;       // step within the current side
+static int side  = 0;       // 0-3, which side of the square
+static int lap   = 0;
+
+static float countsPerMM = 1.0f;
+static const bool ALL_DRIVEN[4] = {true, true, true, true};
+
+// ---------------------------------------------------------------------------
+
+// Sampled mid-move.
+static void trace() {
+  Serial.print(F("      ramp "));
+  Serial.print((int)(move.regulator.profile() * 100.0f));
+  Serial.print(F("%   heading "));
+  Serial.print(headingError(), 2);
+  Serial.print(F(" deg   corr "));
+  Serial.print(move.regulator.headingCorr(), 1);
+  Serial.print(F(" PWM   age "));
+  Serial.print(headingAgeMs());
+  Serial.println(F(" ms"));
+}
+
+static void announce(const __FlashStringHelper* what, long counts) {
+  Serial.print(F("\nlap "));   Serial.print(lap + 1);
+  Serial.print(F("  side "));  Serial.print(side + 1); Serial.print(F("/4  "));
+  Serial.print(what);
+  Serial.print(F("  "));       Serial.print(counts);
+  Serial.println(F(" counts"));
+}
+
+static void report() {
+  Serial.print(F("    wheels "));
+  for (uint8_t i = 0; i < 4; i++) {
+    Serial.print(F("m")); Serial.print(i + 1); Serial.print(F("="));
+    Serial.print(move.regulator.progress(i)); Serial.print(F(" "));
+  }
+  Serial.print(F("  spread "));
+  Serial.print(move.regulator.spread(ALL_DRIVEN) / countsPerMM, 1);
+  Serial.print(F(" mm   heading off by "));
+  Serial.print(headingError(), 2);
+  Serial.println(F(" deg"));
+}
+
+// How far the heading reading moved during the turn, against the direction
+// Heading.h promises for the pattern used.
+static void signVerdict() {
+  if (!headingAvailable()) {
+    Serial.println(F("    SIGN: no sensor, cannot check"));
+    return;
+  }
+  float turned = headingSinceZero();            // zeroed just before the turn
+  float expected = TURN_PATTERN_FBBF ? -90.0f : 90.0f;
+  Serial.print(F("    turned "));
+  Serial.print(turned, 1);
+  Serial.print(F(" deg by the sensor (expected about "));
+  Serial.print(expected, 0);
+  Serial.print(F(")   SIGN: "));
+  if (turned * expected > 0) Serial.println(F("OK"));
+  else                       Serial.println(F("FLIP HEADING_SIGN in Heading.cpp"));
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial && millis() < 2000) { }
+
+  Serial.println(F("\n=== 500 mm SQUARE ==="));
+  Serial.print(F("robot: "));
+  Serial.println(robotSide == LEFT ? F("LEFT / wall") : F("RIGHT / ramp"));
+
+  initHardware();                 // also hands the regulator its PWM band
+  disableDrivers();               // rotor OFF for the whole test
+  myservo.write(closedGate);
+
+  Wire.begin();
+  if (headingBegin()) {
+    Serial.println(F("BNO08x ready - heading hold ACTIVE"));
+  } else {
+    Serial.println(F("BNO08x NOT found - running WITHOUT heading hold"));
+  }
+
+  countsPerMM = (float)pulses / (3.14159265f * diameter);
+  Serial.print(F("counts/mm "));   Serial.println(countsPerMM, 3);
+  Serial.print(F("PWM band "));    Serial.print(move.regulator.minMovePWM);
+  Serial.print(F(" - "));          Serial.print(move.regulator.maxPWM);
+  Serial.print(F("   cruise "));   Serial.println(move.regulator.cruisePWM);
+  Serial.print(F("heading gains P ")); Serial.print(move.regulator.kHeadingP, 1);
+  Serial.print(F(" I "));              Serial.print(move.regulator.kHeadingI, 1);
+  Serial.print(F(" D "));              Serial.println(move.regulator.kHeadingD, 2);
+
+  if (robotSide == LEFT) {
+    Serial.println(F("press the start switch (pin 14) to begin..."));
+    while (digitalRead(switchPin) != HIGH) { }
+  } else {
+    Serial.println(F("starting in 3 s - clear the area"));
+    delay(3000);
+  }
+
+  announce(F("DRIVE"), mm(SIDE_MM));
+}
+
+void loop() {
+
+  headingUpdate();
+
+  // Telemetry, kept outside the state machine so the cases below read exactly
+  // like the ones in Routines.cpp.
+  static unsigned long lastTrace = 0;
+  if (millis() - lastTrace >= TRACE_EVERY_MS) {
+    lastTrace = millis();
+    if (state == 0 || state == 2) trace();
+  }
+
+  switch (state) {
+    case 0:
+      if (move.forward(mm(SIDE_MM))) { report(); state++; }
+      break;
+    case 1:
+      if (move.stopForMillis(mili)) {
+        announce(F("TURN 90"), mm(QUARTER_TURN_MM));
+        headingZero();              // measure the turn from here
+        state++;
+      }
+      break;
+    case 2:
+      if (move.rotate(mm(QUARTER_TURN_MM), TURN_PATTERN_FBBF)) { report(); signVerdict(); state++; }
+      break;
+    case 3:
+      if (move.stopForMillis(mili)) {
+        state = 0;
+        side++;
+
+        if (side >= 4) {
+          side = 0;
+          lap++;
+          Serial.println(F("\n--- lap complete: back at the start, same heading ---"));
+
+          if (LAPS != 0 && lap >= LAPS) {
+            move.stop();
+            disableDrivers();
+            Serial.println(F("\n=== test finished ==="));
+            state = 4;      // park
+            break;
+          }
+        }
+        announce(F("DRIVE"), mm(SIDE_MM));
+      }
+      break;
+    case 4:
+      // finished - hold still
+      break;
+  }
+}

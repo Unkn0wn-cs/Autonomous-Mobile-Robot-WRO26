@@ -2,6 +2,7 @@
 
 #include "Hardware.h"
 #include "RobotConfig.h"
+#include "Heading.h"
 
 int LED = 34;
 
@@ -9,27 +10,20 @@ int LED = 34;
 // Motors, on the Adafruit Motor Shield v1.
 // ---------------------------------------------------------------------------
 
-AF_DCMotor motor1(1); // Motor 1 on the Adafruit Motor Shield
-AF_DCMotor motor2(2); // Motor 2 on the Adafruit Motor Shield
-AF_DCMotor motor3(3); // Motor 3 on the Adafruit Motor Shield
-AF_DCMotor motor4(4); // Motor 4 on the Adafruit Motor Shield
+AF_DCMotor motor1(1); // rear right
+AF_DCMotor motor2(2); // rear left
+AF_DCMotor motor3(3); // front left
+AF_DCMotor motor4(4); // front right
 
 // ---------------------------------------------------------------------------
-// Encoders.
+// Encoders. ORDER IS SIGNIFICANT - see the warning in Hardware.h.
 //
-// ORDER IS SIGNIFICANT - see the warning in Hardware.h. These four must stay
-// together, in this order, in this file.
-//
-// The front pair measures travelled distance and decides when a move is over,
-// exactly as it did before the rear pair existed. That is why every distance
-// already tuned into the routines is still valid.
+// The front pair measures travelled distance and decides when a move is over;
+// all four take part in wheel synchronisation.
 // ---------------------------------------------------------------------------
 
-Encoders encoderLeft(A15, A14);  // motor3, front left
-Encoders encoderRight(A13, A12); // motor4, front right
-
-// Rear encoders, added 2026 so all four wheels can be regulated against each
-// other. Pins confirmed by the author.
+Encoders encoderLeft(A15, A14);      // motor3, front left
+Encoders encoderRight(A13, A12);     // motor4, front right
 Encoders encoderRearRight(A11, A10); // motor1, rear right
 Encoders encoderRearLeft(A9, A8);    // motor2, rear left
 
@@ -38,8 +32,8 @@ Encoders encoderRearLeft(A9, A8);    // motor2, rear left
 Move move(
   motor1, motor2, motor3, motor4,
   encoderRearRight, encoderRearLeft, encoderLeft, encoderRight, // motor1..motor4
-  pwmf[0], pwmf[1], pwmf[2], pwmf[3],      // Forward/backward PWM values
-  pwms[0], pwms[1], pwms[2], pwms[3]       // Left/right/diagonal PWM values
+  pwmf[0], pwmf[1], pwmf[2], pwmf[3],      // forward/backward trims
+  pwms[0], pwms[1], pwms[2], pwms[3]       // strafe/diagonal trims
 );
 
 Servo myservo;
@@ -66,7 +60,35 @@ void disableDrivers() {
   analogWrite(enable34, 0);
 }
 
+// The regulator's heading input. Polls the sensor first (rate-limited inside
+// headingUpdate), so a move keeps getting fresh readings even from code that
+// does not return to loop() between passes.
+static float regulatorHeadingError() {
+  headingUpdate();
+  return headingError();
+}
+
 void initHardware() {
+  // The movement layer reads heading through these hooks so lib/move stays
+  // independent of the sensor. HEADING_SIGN is applied inside Heading.cpp.
+  move.setHeadingHooks(&regulatorHeadingError, &headingCaptureTarget);
+
+  // Usable PWM band for these motors: wheels break free at ~200, 255 is the
+  // ceiling. Cruise sits inside the band so the regulator can push a wheel up
+  // as well as slow it down.
+  move.regulator.minMovePWM   = 200;
+  move.regulator.maxPWM       = 255;
+  move.regulator.rampStartPWM = 205;
+  move.regulator.cruisePWM    = 232;
+
+  // Moves shorter than the burst threshold skip the ramp and regulation and run
+  // straight at cruise - the wall does the aligning on those. All three are in
+  // mm because the two robots count very differently per millimetre.
+  const float countsPerMM = (float)pulses / (3.14159265f * diameter);
+  move.regulator.burstThresholdCounts = (long)(120.0f * countsPerMM);
+  move.regulator.minRampCounts        = (long)(25.0f  * countsPerMM);
+  move.regulator.maxRampCounts        = (long)(220.0f * countsPerMM);
+
   //servo--------------------------------------------
   myservo.attach(10);
 
@@ -82,13 +104,4 @@ void initHardware() {
   pinMode(backSwitchPin, INPUT_PULLUP);
   pinMode(sideSwitchPin, INPUT_PULLUP);
   pinMode(switchPin, INPUT_PULLUP);
-}
-
-// UNUSED. Testing only LED
-void blink() {
-  digitalWrite(LED, HIGH);
-  delay(500);
-  digitalWrite(LED, LOW);
-  delay(500);
-  return;
 }

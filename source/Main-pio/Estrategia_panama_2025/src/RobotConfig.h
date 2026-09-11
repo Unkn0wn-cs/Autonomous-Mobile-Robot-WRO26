@@ -31,8 +31,15 @@ enum side {
 // Per robot values. Defined in RobotConfig.cpp, inside the active block.
 // ---------------------------------------------------------------------------
 
-extern int pwmf[4];          // forward/backward PWM, one per motor
-extern int pwms[4];          // strafe/diagonal PWM, one per motor
+// Per-motor balance for forward/backward (pwmf) and for strafe/diagonal moves
+// (pwms). The regulator drives every wheel from its own cruisePWM (set in
+// Hardware.cpp) and uses only the DIFFERENCES between these four numbers as
+// per-wheel trims: {220,243,243,220} means "wheels 2 and 3 need ~23 more than
+// wheels 1 and 4 to run straight". Raising all four by the same amount changes
+// nothing.
+extern int pwmf[4];
+extern int pwms[4];
+
 extern const long pulses;    // encoder counts per wheel revolution
 extern side robotSide;       // which robot this build drives
 extern int slowRotorSpeed;   // rotor PWM used by enableSlowDrivers()
@@ -40,17 +47,8 @@ extern int closedGate;       // servo angle: gate closed (storing)
 extern int openGate;         // servo angle: gate open (shooting)
 
 // Length of the main straight in mm. Assigned in setup() from robotSide
-// (640 for RIGHT, 1100 for LEFT), so its initial value is irrelevant.
-//
-// NOTE: this used to be declared inside the LEFT block only, which meant the
-// RIGHT configuration did not compile at all. It now lives outside both blocks.
-// This is the one change made here that the LEFT robot cannot notice.
+// (640 for RIGHT, 1100 for LEFT). Declared outside both robot blocks.
 extern int lenght;
-
-// UNUSED. Never read anywhere in the firmware. Kept because the comment records
-// the intended purple ball bounding box format.
-// {x upper left 1st ball, y upper left 1st ball, x bottom right 1st ball, ...}
-extern int pixyBalls[16];
 
 // ---------------------------------------------------------------------------
 // Shared constants, identical on both robots.

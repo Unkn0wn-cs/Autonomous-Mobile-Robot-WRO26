@@ -1,14 +1,13 @@
 // Routines.cpp - the strategy state machine.
 //
-// The logic in this file is a faithful transcription of the original single
-// file firmware. Nothing here has been "improved": several oddities are load
-// bearing, the robot is tuned around them, and they are marked KNOWN where they
-// appear. Read Movement.md before changing any of them.
+// Several behaviours here look odd but the robot is tuned around them; each is
+// marked KNOWN where it appears. Changing one needs a field test.
 
 #include "Routines.h"
 #include "Hardware.h"
 #include "Sensors.h"
 #include "Motion.h"
+#include "Heading.h"
 
 int routine = 4;
 int state = 0;
@@ -23,7 +22,6 @@ int connections;
 int startTime;
 
 int pesos[NUM_FRANJAS] = {0};
-int camera = 0;
 
 bool lastRoutine = false;
 bool midRoutine = false;
@@ -54,7 +52,7 @@ int classifyLane(float x, float y, bool right) {
     float yA = mA * x + bA;
     float yB = mB * x + bB;
 
-    Serial.print("antes de la formula ");
+    Serial.print("lane boundary yA ");
     Serial.println(yA);
 
     if (y < yA) {
@@ -69,11 +67,9 @@ int classifyLane(float x, float y, bool right) {
 // ---------------------------------------------------------------------------
 
 void selectOpeningRoutine() {
-//   //Calculate purple position
-int center_y = 32; //rm changed 6/23/26
+int center_y = 32;
 int center_x = 200;
 
-// int outerBoundary[]= 105;
 
 int noballs = 0;
 
@@ -89,29 +85,25 @@ if (pixy.ccc.numBlocks > 0) {
 
       int ix = pixy.ccc.blocks[j].m_x;
       int iy = pixy.ccc.blocks[j].m_y;
-      //definir routine
+      // pick the opening routine from the quadrant
       if (ix < center_x && iy < center_y){
         routine = 0;
         pixy.ccc.blocks[j].print();
-        // blink();
         Serial.print("upper left corner, case 1");
         return;
       } else if (ix > center_x && iy < center_y){
         routine = 1;
         pixy.ccc.blocks[j].print();
-        // blink(); blink();
         Serial.print("upper right corner, case 3");
         return;
       } else if (ix < center_x && iy > center_y){
         routine = 2;
         pixy.ccc.blocks[j].print();
-        // blink(); blink(); blink();
         Serial.print("lower left corner, case 0");
         return;
       } else if (ix > center_x && iy > center_y){
         routine = 3;
         pixy.ccc.blocks[j].print();
-        // blink(); blink(); blink(); blink();
         Serial.print("lower Right corner, case 2");
         return;
       }
@@ -130,11 +122,10 @@ pixy.setLamp(0, 0);
 // ---------------------------------------------------------------------------
 
 void handleMicroSwitches() {
-  // KNOWN BUG, PRESERVED DELIBERATELY: microSwitchTime and currentTime are
-  // `int`, which is 16 bits on AVR, so both truncate millis() and wrap every
-  // 32.767 seconds. The 350 ms debounce below therefore misbehaves around each
-  // wrap. This is live code. Correcting it to unsigned long changes switch
-  // timing, so it needs a field test before it is changed.
+  // KNOWN: microSwitchTime and currentTime are `int`, 16 bits on AVR, so both
+  // truncate millis() and wrap every 32.767 seconds; the 350 ms debounce
+  // misbehaves around each wrap. Changing them to unsigned long changes switch
+  // timing, so it needs a field test.
   static int microSwitchTime = 0;
   int currentTime = millis();
     bool currentBackSwitchState = digitalRead(backSwitchPin);
@@ -150,7 +141,7 @@ void handleMicroSwitches() {
         if (!(routine == 6 && state == 2)){
           state++;
         }
-        Serial.println("Gyro angles reset by microswitch!");
+        Serial.println("Heading zeroed by microswitch");
       }
       if (currentSideSwitchState == LOW && lastSideSwitchState == HIGH && routine!= 4  && !(routine == 7 && state == 8)  ) {
         microSwitchTime = millis();
@@ -204,7 +195,6 @@ switch (routine) {//------------------------------------------------------------
         if(move.forward(mm(505))) state++;
         break;
       case 3:
-        // if(move.stopForMillis(mili))
         state++;
         break;
       case 4:
@@ -238,7 +228,6 @@ switch (routine) {//------------------------------------------------------------
         if(move.forward(mm(530))) state++;
         break;
       case 4:
-        // if(move.stopForMillis(mili))
         state++;
         break;
       case 5:
@@ -267,7 +256,6 @@ switch (routine) {//------------------------------------------------------------
         if(move.forward(mm(550))) state++;
         break;
       case 3:
-        // if(move.stopForMillis(mili))
         state++;
         break;
       case 4:
@@ -297,7 +285,6 @@ switch (routine) {//------------------------------------------------------------
         if(move.forward(mm(550))) state++;
         break;
       case 4:
-        // if(move.stopForMillis(mili))
         state++;
         break;
       case 5:
@@ -327,10 +314,13 @@ switch (routine) {//------------------------------------------------------------
         break;
       case -2:
         // KNOWN: outer() converts with mm() internally, so this is mm(mm(20)),
-        // about 453 counts rather than 95. Tuned around; do not "fix".
+        // about 453 counts rather than 95. The robot is tuned around it.
         if(outer(mm(20))) state--;
         break;
       case -3:
+        // KNOWN: forwardp returns 2 at 14/22 of the distance and the bare `if`
+        // treats that as done, so this state ends at ~255 mm of the 400 with
+        // the motors still running; state -4 releases them.
         if (robotSide == RIGHT){
           if(move.forwardp(mm(400), true)) state--;
         }else{
@@ -370,7 +360,6 @@ switch (routine) {//------------------------------------------------------------
                 enableSlowDrivers();
                 break;
            }
-            // if(move.forward(mm(lenght + 50))) state++;
           } else if(lane == OUTER){
               if (robotSide == RIGHT){
                 int test = move.forwardp(mm(lenght + 50), true);
@@ -383,7 +372,6 @@ switch (routine) {//------------------------------------------------------------
                     break;
                 }
 
-                // if(move.forwardp(mm(lenght + 50), true) == 1) state++;  //no middle signal
               }else{
                 int test = move.forwardp(mm(lenght + 50), false);
                 if (test == 2){enableSlowDrivers();}
@@ -393,7 +381,6 @@ switch (routine) {//------------------------------------------------------------
                     break;
                 }
 
-                // if(move.forwardp(mm(lenght + 100), false) == 1) state++;
               }
           }
         break;
@@ -526,7 +513,6 @@ switch (routine) {//------------------------------------------------------------
           if(inner(180)) state++;
         } else if (first == true){
           state = 7;
-          // first = false;
           break;
         }else if(!first){
           if(inner(180)) state++;
@@ -545,26 +531,22 @@ switch (routine) {//------------------------------------------------------------
             if (pixy.ccc.blocks[i].m_signature == orangeSignature){
             Block block = pixy.ccc.blocks[i];
 
-            // Clasifica en franja según posición X
+            // Classify into a franja by image position.
             // KNOWN: `true` is hard coded, so the LEFT robot classifies using
-            // the RIGHT robot's boundary lines. Tuned around; do not "fix".
+            // the RIGHT robot's boundary lines. The robot is tuned around it.
             int franja = classifyLane(block.m_x, block.m_y, true);
             franja = constrain(franja, 0, NUM_FRANJAS - 1);
 
-            // Calcula tamaño como área
+            // Blob area is its weight.
             int tamano = block.m_width * block.m_height;
 
-            // Suma al peso de la franja
             pesos[franja] += tamano;
           }
         }
-          camera++;
-        } else {
-          camera = 0;
         }
 
         if(move.stopForMillis(mili/2)) {
-          // Encuentra la franja con mayor peso
+          // Pick the heaviest franja
             int mejorFranja = 0;
             for (int i = 1; i < NUM_FRANJAS; i++) {
               if (pesos[i] > pesos[mejorFranja]) {
@@ -597,7 +579,7 @@ switch (routine) {//------------------------------------------------------------
         break;
 
       case 7:
-          //Reset Camera weights
+          // Reset the camera weights
           for (int i = 0; i < NUM_FRANJAS; i++) {
             pesos[i] = 0;
           }
@@ -658,14 +640,14 @@ switch (routine) {//------------------------------------------------------------
       case 4:
         digitalWrite(LED, HIGH);
 
-        if (mpu == true){
+        if (headingAvailable()){
           if (robotSide == LEFT){
             alpha = -80;
           } else {alpha  = 80;}
 
-          if (ang_z >= alpha + beta) {
+          if (headingSinceZero() >= alpha + beta) {
               move.rotateCCW(200, 200, 200, 200);
-          } else if (ang_z <= alpha - beta){
+          } else if (headingSinceZero() <= alpha - beta){
               move.rotateCW(200, 200, 200, 200);
           } else {
             state++;
@@ -707,18 +689,17 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 11:
         if(move.stopForMillis(mili/2)) state++;
-        // rotation = false;
         break;
       case 12:
         digitalWrite(LED, HIGH);
 
-        if (mpu == true){
+        if (headingAvailable()){
           if (robotSide == LEFT){
             alpha = -80;
           } else {alpha  = 80;}
-          if (ang_z >= alpha + beta) {
+          if (headingSinceZero() >= alpha + beta) {
               move.rotateCCW(200, 200, 200, 200);
-          } else if (ang_z <= alpha - beta){
+          } else if (headingSinceZero() <= alpha - beta){
               move.rotateCW(200, 200, 200, 200);
           } else {
             state++;
@@ -772,16 +753,15 @@ switch (routine) {//------------------------------------------------------------
   break;
   case 8:
     alpha = 0;
-    if (ang_z >= alpha + beta) {
+    if (headingSinceZero() >= alpha + beta) {
         move.rotateCCW(200, 200, 200, 200);
-    } else if (ang_z <= alpha - beta) {
+    } else if (headingSinceZero() <= alpha - beta) {
         move.rotateCW(200, 200, 200, 200);
     } else {
         routine = 7;
         state = 0;
     }
-    // KNOWN: no `break` here. Control deliberately falls through into case 9
-    // on every pass. Preserved exactly as written.
+    // KNOWN: no `break` here - control falls through into case 9 on every pass.
 
   case 9:
     if (lastRoutine == false and millis() > 61000){
@@ -817,9 +797,10 @@ switch (routine) {//------------------------------------------------------------
             ((robotSide == RIGHT && movement > 0) ||
             (robotSide == LEFT && movement < maxmove))) {
 
-            // KNOWN: this blocks the whole firmware until the strafe finishes.
-            // It stops sensing, switch handling and regulation for the duration.
-            // Preserved as is; do not copy this pattern into new code.
+            // KNOWN: blocks the whole firmware until the strafe finishes -
+            // switch handling and the rest of loop() do not run meanwhile.
+            // The regulator still gets fresh headings (its hook polls the
+            // sensor), so the strafe itself stays regulated.
             while (true){
               if(move.right(mm(moveby))) break;
             }

@@ -10,11 +10,11 @@
 //   10            gate servo (Servo library, Timer5)
 //   14            start switch
 //   18, 19        back / side microswitches (polled, NOT interrupts)
-//   20, 21        I2C (MPU6050)
+//   20, 21        I2C (BNO08x heading sensor)
 //   34            debug LED
 //   46, 48        rotor L293D input4 / input3
 //   50-53         SPI (Pixy2, SS = 53 on the Mega)
-//   A8-A15        the four quadrature encoders - PORTK IS NOW FULL
+//   A8-A15        the four quadrature encoders - PORTK is full
 //
 // TIMER OWNERSHIP - stealing one of these breaks motors with no compile error:
 //   Timer1  motor1 PWM        Timer3  motor2 + motor4 PWM
@@ -86,9 +86,7 @@ void enableSlowDrivers();  // rotor at slowRotorSpeed (90 LEFT / 180 RIGHT)
 void enableDrivers();      // rotor at full speed (254)
 void disableDrivers();     // rotor stopped
 
-// Sets pin modes, attaches the servo and fixes the rotor direction.
-// Call once from setup(), before anything drives.
+// Sets pin modes, attaches the servo, fixes the rotor direction and hands the
+// regulator its PWM band and heading hooks. Call once from setup(), before
+// anything drives.
 void initHardware();
-
-// UNUSED. Debug helper; every call site is commented out.
-void blink();

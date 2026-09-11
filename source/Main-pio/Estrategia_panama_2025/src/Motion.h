@@ -29,6 +29,5 @@ bool inner(int mili);
 // CAREFUL: converts with mm() internally, and two call sites pass an already
 // converted value - `outer(mm(20))` in routine 4 state -2 and routine 7 state 6.
 // That is mm(mm(20)), about 453 counts rather than 95. The robot is tuned around
-// this behaviour, so it is preserved deliberately. Do not "fix" it without
-// re-running the whole course.
+// this; changing it means re-running the whole course.
 bool outer(int mili);
