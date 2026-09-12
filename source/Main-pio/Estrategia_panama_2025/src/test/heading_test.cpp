@@ -1,7 +1,8 @@
 // heading_test.cpp - BNO08x readout only. NOT the competition firmware.
 //
 // THE ROBOT DOES NOT MOVE. This program never touches a motor and does not even
-// compile the drivetrain - no AFMotor, no encoders, no Move. If it reads
+// compile the drivetrain - no AFMotor, no Move. It links Sensors.cpp, so the
+// encoder and camera objects exist, but nothing here reads them. If it reads
 // sensibly, the sensor and its wiring are good independently of anything the
 // movement code is doing.
 //
@@ -27,11 +28,11 @@
 //      degree a minute is irrelevant over a match.
 //   3. WHICH WAY IS POSITIVE? `rel` (HEADING_SIGN applied) increases when the
 //      robot is turned the way the rotateCW() wheel pattern turns it - see
-//      Heading.h. The definitive check is square_test's SIGN verdict, which
+//      Sensors.h. The definitive check is square_test's SIGN verdict, which
 //      measures the turn against the actual wheel pattern.
 //   4. HOW FAST DOES IT REPORT? `rate` is reports per second actually
 //      delivered over the last print interval, against the 400 Hz requested
-//      in Heading.cpp. Also confirms the I2C bus is healthy at 400 kHz.
+//      in Sensors.cpp. Also confirms the I2C bus is healthy at 400 kHz.
 //   5. DOES IT RESET? `rst` counts sensor resets. Any reset during a run is a
 //      power problem to chase: each one re-references the heading.
 //
@@ -41,12 +42,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-#include "Heading.h"
-
-// Declared here rather than included from Hardware.h on purpose: including that
-// would drag the whole drivetrain into a test whose entire point is to depend on
-// none of it. Matches switchPin in Hardware.h.
-static const uint8_t START_SWITCH_PIN = 14;
+#include "Sensors.h"
 
 static const unsigned long PRINT_EVERY_MS = 1000;
 static const unsigned long RETRY_EVERY_MS = 3000;
@@ -160,7 +156,7 @@ void setup() {
   // a port nobody is listening to yet, and the screen stays blank.
   delay(1500);
 
-  pinMode(START_SWITCH_PIN, INPUT_PULLUP);
+  initSensors();   // start switch pin
 
   Serial.println(F("\n\n=== BNO08x heading readout - THE ROBOT DOES NOT MOVE ==="));
 
@@ -187,7 +183,7 @@ void loop() {
   headingUpdate();
 
   static bool lastSwitch = HIGH;
-  bool nowSwitch = digitalRead(START_SWITCH_PIN);
+  bool nowSwitch = digitalRead(switchPin);
   if (lastSwitch == HIGH && nowSwitch == LOW) rezero(F("switch"));
   lastSwitch = nowSwitch;
 

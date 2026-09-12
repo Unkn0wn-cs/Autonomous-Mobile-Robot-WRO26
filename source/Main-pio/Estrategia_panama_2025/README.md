@@ -39,8 +39,8 @@ Sources: [WRO 2026 RoboSports General Rules](https://wro-association.org/wp-cont
 
 ## 2. The two robots
 
-One firmware, one robot selected by commenting a block in
-[`src/RobotConfig.cpp`](src/RobotConfig.cpp).
+One firmware, one robot selected by commenting a block at the top of
+[`src/Hardware.cpp`](src/Hardware.cpp).
 
 | | LEFT — "WALL" | RIGHT — "RAMP" |
 |---|---|---|
@@ -49,7 +49,7 @@ One firmware, one robot selected by commenting a block in
 | `pwmf` forward trims | 245, 243, 243, 245 | 220, 243, 243, 220 |
 | `pwms` strafe trims | 220, 225, 220, 225 | 200, 200, 200, 200 |
 | Rotor slow speed | 90 | 180 |
-| Gate closed / open | 170° / 55° | 96° / 0° |
+| Gate closed / open | 180° / 55° | 116° / 0° |
 | Waits for start switch | **yes** | no |
 
 `pwmf`/`pwms` are per-wheel **trims**: the drive layer runs every wheel from its
@@ -74,8 +74,9 @@ runs at different distances from the centre wall:
   right; for the LEFT robot, to its left.
 - **INNER** = closest to the centre wall.
 
-`outer()` strafes right on RIGHT and left on LEFT; `inner()` does the opposite
-([`src/Motion.cpp`](src/Motion.cpp)).
+`move.outer()` strafes right on RIGHT and left on LEFT; `move.inner()` does the
+opposite ([`lib/move/move.h`](lib/move/move.h), fed the robot's side by
+`initHardware()`).
 
 One lap is:
 
@@ -106,9 +107,9 @@ franja's weight. The heaviest franja wins and maps to a lane, mirrored per robot
 
 Before the match runs, `selectOpeningRoutine()` scans the Pixy for up to 900 ms
 for the purple ball and matches its **bounding box** against four calibrated
-rectangles, `ballZones` in `src/RobotConfig.cpp` (one table per robot; the
-format and a calibration guide are in `src/RobotConfig.h`). The row index of the
-matched rectangle is the routine:
+rectangles, `ballZones` in `src/Hardware.cpp` (one table per robot, inside the
+robot's block; the format and a calibration guide are in `src/Hardware.h`). The
+row index of the matched rectangle is the routine:
 
 | Purple ball seen | Routine | Then continues on lane |
 |---|---|---|
@@ -137,7 +138,7 @@ blob that appears:
    winner, the zone with the most votes is used.
 
 The sensitivity constants live at the top of the detector in
-`src/Routines.cpp`. It prints one `blob edges L.. T.. R.. B..` line per voting
+`src/generalStrategy.cpp`. It prints one `blob edges L.. T.. R.. B..` line per voting
 frame and a final `ball scan .. ms votes ..` summary on Serial, which is what
 you use to read off the rectangles when calibrating.
 
@@ -167,13 +168,14 @@ to be open at the moment the robot passes over where the ball was seen:
 
 **OUTER** — states −1 → −6 (the state counts *down*):
 
-1. rotor off, `rotate(mm(166))` — turn
-2. `outer(mm(20))` — strafe outward (KNOWN: mm applied twice, ≈453 counts)
-3. `forwardp(mm(400))` — wall-hugging run. KNOWN: `forwardp` returns `2` at
+1. rotor off, `rotate(166)` — turn
+2. `outer(95)` on LEFT / `outer(143)` on RIGHT — strafe outward (KNOWN: a
+   per-robot distance the course is tuned around)
+3. `forwardp(400)` — wall-hugging run. KNOWN: `forwardp` returns `2` at
    14/22 of the distance and the bare `if` accepts it, so this state ends at
    ≈255 mm with the motors still running; state −4 releases them.
 4. rotor on, pause
-5. rotor off, `rotate(mm(166))` back
+5. rotor off, `rotate(166)` back
 6. strafe outward again → drop into state 0 and run the straight above
 
 On the OUTER lane the straight (routine 4 state 2) uses `forwardp` and the
@@ -198,8 +200,8 @@ touches first, and the encoder distance or the 4 s move timeout ends the move
 instead. That is what the corner reset in routine 7 recovers from.
 
 Routine 7 is the full corner reset: reverse into the wall, nudge forward, turn
-by encoder count (`rotate(mm(146))`), strafe out, run 550 mm, reverse, turn
-again (`rotate(mm(166))`), and finish with two small trim rotations. Every turn
+by encoder count (`rotate(146)`), strafe out, run 550 mm, reverse, turn
+again (`rotate(166)`), and finish with two small trim rotations. Every turn
 in the routines is encoder-counted; the heading sensor only holds the heading
 during straights and strafes.
 
@@ -228,20 +230,20 @@ uncommenting it; `startTime` must become `unsigned long` first (it is a 16-bit
 
 | File | Owns |
 |---|---|
-| `src/main.cpp` | `setup()` / `loop()` and the telemetry line |
-| `src/RobotConfig.*` | **the robot selector** + per-robot tuning |
-| `src/Hardware.*` | pins, motors, encoders, `Move`, servo, rotor, regulator band |
-| `src/Heading.*` | BNO08x: polling, references, sign, fail-safes |
-| `src/Sensors.*` | Pixy2, I2C bus scan, microswitches |
-| `src/Motion.*` | `mm()`, `inner()`, `outer()` |
-| `src/Routines.*` | the routine/state machine |
-| `lib/move/move.h` | motion primitives (non-blocking) |
+| `src/main.cpp` | `setup()` / `loop()` |
+| `src/Hardware.*` | everything physical that *moves*: **the robot selector** + per-robot tuning, wheel geometry, motors, `Move`, servo, rotor and their pins, `initHardware()` |
+| `src/Sensors.*` | everything that *senses* and its pins: the four encoders, BNO08x heading (polling, references, sign, fail-safes), Pixy2, microswitches, `initSensors()`, I2C bus scan — and the telemetry (status block + table on USB and Bluetooth) |
+| `src/generalStrategy.*` | the routine/state machine, purple ball detector, camera lane choice, microswitch handling, `mili` |
+| `lib/move/move.h` | motion primitives (non-blocking, in millimetres), `inner()`, `outer()` |
 | `lib/move/WheelRegulator.h` | speed profile (encoders) + heading PID (BNO08x) |
 | `src/test/` | bench programs, excluded from the competition build |
 
-Dependencies point one way: `Routines` → `Motion` / `Sensors` / `Hardware` /
-`Heading` → `lib/move`. `lib/move` knows nothing about the sensor; it receives
-heading through two function pointers set in `initHardware()`.
+Dependencies point one way: `generalStrategy` → `Hardware` / `Sensors` →
+`lib/move`. `lib/move` knows nothing about the sensor or which robot it is on:
+`initHardware()` hands it the heading through two function pointers, the
+encoder counts per millimetre (`move.regulator.countsPerMM`, which every move
+uses to convert its millimetres) and which way is inner. `Sensors` depends on
+nothing else in `src/`, so the bench tests can compile it alone.
 
 `loop()` order is fixed: `handleMicroSwitches()`, `updateEndgameTiming()`,
 `headingUpdate()`, telemetry, then `runRoutines()` **last** (routine 4 state 5
@@ -271,37 +273,55 @@ pio device monitor -e square_test
 
 ### Telemetry (competition firmware)
 
-One line every 250 ms, identical on the USB serial (115200) and on **Serial2**
-(TX2 = pin 16, RX2 = pin 17, **9600** — `BLUETOOTH_BAUD` in `src/main.cpp`),
-where a Bluetooth serial module streams it to a phone or laptop while the robot
-drives:
+Everything below goes out identically on the USB serial (115200) and on
+**Serial2** (TX2 = pin 16, RX2 = pin 17, **9600** — `BLUETOOTH_BAUD` in
+`src/Sensors.cpp`), where a Bluetooth serial module streams it to a phone or
+laptop while the robot drives. It never blocks: each `loop()` pass sends at most
+one line, and only when both transmit buffers (128 bytes,
+`SERIAL_TX_BUFFER_SIZE` in `platformio.ini`) have room for all of it.
+
+**Status block** — at the end of `setup()` and again 5 s later, so a phone that
+connects late still sees it:
 
 ```
-r4 s2   MIDDLE  ball 180,25  hdg   -1.2  err  -0.35  corr   3.2  pwm 232 240 228 235  v  310  305  312  300
-r4 s2   MIDDLE  ball 180,25  hdg   -1.3  err  -0.41  corr   3.7  pwm 233 239 229 234  v  312  301  315  298
+----- status  t 0.0 s -----
+robot     LEFT (wall)   straight 1100 mm
+heading   OK      BNO08x 0x4A   reports 812   resets 0
+camera    OK      Pixy2 firmware 3.0.11
+switches  back 1  side 1  start 0   (1 = open)
+encoders  0 0 0 0   errors 0 0 0 0
+opening   routine 1   purple ball upper right
+check     ALL OK
 ```
 
-Columns are fixed width, so lines stack into a table.
+| Line | Meaning |
+|---|---|
+| `robot` | which build is running and its main straight — the first thing to check on the wrong robot |
+| `heading` | `OK`, `STALE` (found, but silent for 1 s) or `NOT FOUND`; I2C address, reports received, resets |
+| `camera` | `OK` with the Pixy2 firmware version, or `FAIL` with the `pixy.init()` error code |
+| `switches` | raw level of the back, side and start switch pins; pulled up, so 1 = open |
+| `encoders` | count and skipped-transition errors of motor1..motor4 — errors must stay 0 |
+| `opening` | the routine `selectOpeningRoutine()` chose (0–3 with the ball position, or 4 with no ball) |
+| `check` | `ALL OK`, or `PROBLEM:` followed by what failed — `heading`, `camera`, `encoder-errors` |
+
+**Table** — one row every 250 ms, header repeated every 20 rows:
+
+```
+  r   s     hdg     err   corr  pwm1 pwm2 pwm3 pwm4     v1    v2    v3    v4
+  4   2    -1.2   -0.35    3.2   232  240  228  235    310   305   312   300
+  4   2    -1.3   -0.41    3.7   233  239  229  234    312   301   315   298
+```
 
 | Column | Meaning |
 |---|---|
 | `r`, `s` | routine and state |
-| lane | `OUTER` / `MIDDLE` / `INNER` — the lane the robot is committed to. Changes when routine 6 picks the next one from the camera weighting |
-| `ball` | where the purple ball was seen at boot, Pixy image pixels `x,y` (the `ballZones` rectangle it matched picked the opening routine); `none` if it never was |
 | `hdg` | heading since power-on, degrees (0 when the sensor is stale) |
 | `err` | heading error the regulator sees, degrees (0 when the sensor is stale) |
 | `corr` | heading differential being applied, PWM (±40 max) |
-| `pwm` | PWM on motor1..motor4 — rear right, rear left, front left, front right; 0 for a released wheel |
-| `v` | speed of motor1..motor4 in mm/s, sign follows the encoder's counting direction |
+| `pwm1`–`pwm4` | PWM on motor1..motor4 — rear right, rear left, front left, front right; 0 for a released wheel |
+| `v1`–`v4` | speed of motor1..motor4 in mm/s, sign follows the encoder's counting direction |
 
-Sensor health (report rate, age, resets) is what `heading_test` shows; the
-competition line does not carry it.
-
-`TELEMETRY = false` in `src/main.cpp` silences it. The line is built in a buffer
-and written only when both transmit buffers (128 bytes, `SERIAL_TX_BUFFER_SIZE`
-in `platformio.ini`) have room for all of it, so `write()` never waits for the
-UART and `loop()` never stalls for it — at 9600 the longest line leaves in
-about 115 ms, inside the 250 ms period.
+`TELEMETRY = false` in `src/Sensors.cpp` silences both ports.
 
 **Bluetooth module** (JY-MCU carrier with an HC-05 or HC-06): module RX ← pin 16,
 module TX → pin 17, GND ← GND, VCC ← 5 V. The competition firmware never reads
@@ -345,10 +365,10 @@ commands for each — rename (`AT+NAMExxx`), PIN (`AT+PIN1234`), or a faster rat
 
 1. **`heading_test`** — `rate` should read close to 400 Hz, `age` a few ms,
    `rst` 0. If `rate` is far below 400 the sensor is delivering a lower rate;
-   if `age` climbs or `rst` counts up, set `I2C_CLOCK_HZ` in `Heading.cpp` back
+   if `age` climbs or `rst` counts up, set `I2C_CLOCK_HZ` in `Sensors.cpp` back
    to 100000 and check the sensor's supply.
 2. **`square_test`** — after the first turn the line `SIGN: OK` must appear. If
-   it says `FLIP`, change `HEADING_SIGN` in `Heading.cpp` and re-flash: with the
+   it says `FLIP`, change `HEADING_SIGN` in `Sensors.cpp` and re-flash: with the
    wrong sign the heading loop steers away from straight instead of back to
    it. Then watch `heading` settle toward 0 on each side and the
    robot finish where it started. After each move the line `overshoot X mm`
@@ -366,7 +386,7 @@ Each is marked `KNOWN` where it appears in the code.
 
 | Where | Behaviour |
 |---|---|
-| routine 4 state −2, routine 7 state 6 | `outer(mm(20))`: `outer()` converts with `mm()` internally, so this is `mm(mm(20))` ≈ 453 counts |
+| routine 4 state −2, routine 7 state 6 | `outer(95)` on LEFT, `outer(143)` on RIGHT — a per-robot distance |
 | routine 4 state −3 | bare `if` on `forwardp`, so the state ends at 14/22 of 400 mm |
 | routine 4 state 5 | bare `return` for LEFT on INNER — `runRoutines()` must be last in `loop()` |
 | routine 6 state 6 | `classifyLane(..., true)` on both robots |
@@ -374,4 +394,4 @@ Each is marked `KNOWN` where it appears in the code.
 | routine 9 | `while (true)` strafes block the whole firmware until they finish |
 | `handleMicroSwitches()` | `int` timers wrap every 32.767 s |
 | `startTime` | `int`, wraps every 32.767 s; only read by the disabled endgame block |
-| `Motion.cpp` | some call sites pass raw encoder counts, not mm: `forward(80)`, `backward(600)`, `outer(750)`, `inner(180)` |
+| routine 5 state 2, routine 7 states 2 and 10 | per-robot nudges: `backward(126 / 84)`, `forward(17 / 11)`, `backward(4 / 3)` (LEFT / RIGHT) |

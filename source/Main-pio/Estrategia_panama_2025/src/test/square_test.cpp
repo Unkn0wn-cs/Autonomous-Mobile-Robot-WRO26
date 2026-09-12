@@ -8,11 +8,11 @@
 //        v      |          is error you can measure on the floor.
 //        +------>
 //
-// Written in the same shape as the competition routines in src/Routines.cpp - a
-// switch(state) whose cases advance on `if (move.X(...))`, with
-// move.stopForMillis(mili) for the settle time. It calls the same Move, the same
-// WheelRegulator and the same BNO08x, so whatever this square does is what
-// routine 4 will do.
+// Written in the same shape as the competition routines in
+// src/generalStrategy.cpp - a switch(state) whose cases advance on
+// `if (move.X(...))`, with move.stopForMillis(SETTLE_MS) for the settle time.
+// It calls the same Move, the same WheelRegulator and the same BNO08x, so
+// whatever this square does is what routine 4 will do.
 //
 // BUILD AND RUN
 //   pio run -e square_test -t upload
@@ -36,32 +36,32 @@
 //            skipped transitions per encoder (m1 m2 m3 m4). Climbing counts
 //            mean missed edges - the robot travels further than it counts.
 //   SIGN     printed after every turn. The heading reading must move the way
-//            Heading.h says it does for the wheel pattern used. "OK" means the
+//            Sensors.h says it does for the wheel pattern used. "OK" means the
 //            heading loop corrects toward straight, not away from it; "FLIP"
-//            means change HEADING_SIGN in Heading.cpp. Check this on the first
+//            means change HEADING_SIGN in Sensors.cpp. Check this on the first
 //            turn - with the wrong sign the heading loop pushes the robot AWAY
 //            from straight on every side.
 //
-// SAFETY: the rotor is held OFF throughout and the gate parked closed.
+// SAFETY: the rotor is held OFF throughout and the gate parked closed. The
+// camera object is compiled in (it shares Sensors.cpp with the encoders and
+// the heading sensor) but never initialised or read.
 
 #include <Arduino.h>
-#include <Wire.h>   // the competition build gets this via Sensors.h, which this
-                    // test deliberately does not compile
+#include <Wire.h>
 
-#include "RobotConfig.h"
 #include "Hardware.h"
-#include "Motion.h"
-#include "Heading.h"
+#include "Sensors.h"
 
 // ---------------------------------------------------------------------------
 // Test parameters
 // ---------------------------------------------------------------------------
 
-static const int SIDE_MM = 500;   // half a metre per side
-static const int LAPS    = 4;     // 0 = run forever
+static const int SIDE_MM   = 500;   // half a metre per side
+static const int LAPS      = 4;     // 0 = run forever
+static const int SETTLE_MS = 250;   // pause after each move, same as `mili` in the routines
 
-// Encoder distance for a 90 degree turn: the value the routines use for a
-// quarter turn (mm(166); mm(146) for their 80 degree turns). Adjust if the
+// Wheel travel for a 90 degree turn: the value the routines use for a quarter
+// turn (rotate(166); rotate(146) for their 80 degree turns). Adjust if the
 // robot over- or under-turns.
 static const int QUARTER_TURN_MM = 166;
 
@@ -73,14 +73,12 @@ static const bool TURN_PATTERN_FBBF = false;
 static const unsigned long TRACE_EVERY_MS = 250;
 
 // ---------------------------------------------------------------------------
-// State, in the same style as Routines.cpp
+// State, in the same style as generalStrategy.cpp
 // ---------------------------------------------------------------------------
 
 static int state = 0;       // step within the current side
 static int side  = 0;       // 0-3, which side of the square
 static int lap   = 0;
-
-static float countsPerMM = 1.0f;
 
 // ---------------------------------------------------------------------------
 
@@ -110,11 +108,12 @@ static void trace() {
 
 // Printed once the robot has settled after a move: how far past the target
 // the front wheels ended up, and whether any encoder skipped transitions
-// (a rising error count means missed edges, i.e. under-counting).
-static void settled(long targetCounts) {
-  long over = move.frontTravelCounts() - targetCounts;
+// (a rising error count means missed edges, i.e. under-counting). The
+// regulator still holds the target of the move that just ended.
+static void settled() {
+  long over = move.frontTravelCounts() - move.regulator.target();
   Serial.print(F("    overshoot "));
-  Serial.print(over / countsPerMM, 1);
+  Serial.print(over / move.regulator.countsPerMM, 1);
   Serial.print(F(" mm   encoder errors "));
   Serial.print(encoderRearRight.getEncoderErrorCount()); Serial.print(' ');
   Serial.print(encoderRearLeft.getEncoderErrorCount());  Serial.print(' ');
@@ -122,12 +121,12 @@ static void settled(long targetCounts) {
   Serial.println(encoderRight.getEncoderErrorCount());
 }
 
-static void announce(const __FlashStringHelper* what, long counts) {
+static void announce(const __FlashStringHelper* what, int millimetres) {
   Serial.print(F("\nlap "));   Serial.print(lap + 1);
   Serial.print(F("  side "));  Serial.print(side + 1); Serial.print(F("/4  "));
   Serial.print(what);
-  Serial.print(F("  "));       Serial.print(counts);
-  Serial.println(F(" counts"));
+  Serial.print(F("  "));       Serial.print(millimetres);
+  Serial.println(F(" mm"));
 }
 
 static void report() {
@@ -142,7 +141,7 @@ static void report() {
 }
 
 // How far the heading reading moved during the turn, against the direction
-// Heading.h promises for the pattern used.
+// Sensors.h promises for the pattern used.
 static void signVerdict() {
   if (!headingAvailable()) {
     Serial.println(F("    SIGN: no sensor, cannot check"));
@@ -156,7 +155,7 @@ static void signVerdict() {
   Serial.print(expected, 0);
   Serial.print(F(")   SIGN: "));
   if (turned * expected > 0) Serial.println(F("OK"));
-  else                       Serial.println(F("FLIP HEADING_SIGN in Heading.cpp"));
+  else                       Serial.println(F("FLIP HEADING_SIGN in Sensors.cpp"));
 }
 
 void setup() {
@@ -168,6 +167,7 @@ void setup() {
   Serial.println(robotSide == LEFT ? F("LEFT / wall") : F("RIGHT / ramp"));
 
   initHardware();                 // also hands the regulator its PWM band
+  initSensors();                  // start switch pin
   disableDrivers();               // rotor OFF for the whole test
   myservo.write(closedGate);
 
@@ -178,8 +178,7 @@ void setup() {
     Serial.println(F("BNO08x NOT found - running WITHOUT heading hold"));
   }
 
-  countsPerMM = (float)pulses / (3.14159265f * diameter);
-  Serial.print(F("counts/mm "));   Serial.println(countsPerMM, 3);
+  Serial.print(F("counts/mm "));   Serial.println(move.regulator.countsPerMM, 3);
   Serial.print(F("ramp start "));  Serial.print(move.regulator.rampStartPWM);
   Serial.print(F("   cruise "));   Serial.print(move.regulator.cruisePWM);
   Serial.print(F("   max "));      Serial.println(move.regulator.maxPWM);
@@ -196,7 +195,7 @@ void setup() {
     delay(3000);
   }
 
-  announce(F("DRIVE"), mm(SIDE_MM));
+  announce(F("DRIVE"), SIDE_MM);
 }
 
 void loop() {
@@ -204,7 +203,7 @@ void loop() {
   headingUpdate();
 
   // Telemetry, kept outside the state machine so the cases below read exactly
-  // like the ones in Routines.cpp.
+  // like the ones in generalStrategy.cpp.
   static unsigned long lastTrace = 0;
   if (millis() - lastTrace >= TRACE_EVERY_MS) {
     lastTrace = millis();
@@ -213,22 +212,22 @@ void loop() {
 
   switch (state) {
     case 0:
-      if (move.forward(mm(SIDE_MM))) { report(); state++; }
+      if (move.forward(SIDE_MM)) { report(); state++; }
       break;
     case 1:
-      if (move.stopForMillis(mili)) {
-        settled(mm(SIDE_MM));
-        announce(F("TURN 90"), mm(QUARTER_TURN_MM));
+      if (move.stopForMillis(SETTLE_MS)) {
+        settled();
+        announce(F("TURN 90"), QUARTER_TURN_MM);
         headingZero();              // measure the turn from here
         state++;
       }
       break;
     case 2:
-      if (move.rotate(mm(QUARTER_TURN_MM), TURN_PATTERN_FBBF)) { report(); signVerdict(); state++; }
+      if (move.rotate(QUARTER_TURN_MM, TURN_PATTERN_FBBF)) { report(); signVerdict(); state++; }
       break;
     case 3:
-      if (move.stopForMillis(mili)) {
-        settled(mm(QUARTER_TURN_MM));
+      if (move.stopForMillis(SETTLE_MS)) {
+        settled();
         state = 0;
         side++;
 
@@ -245,7 +244,7 @@ void loop() {
             break;
           }
         }
-        announce(F("DRIVE"), mm(SIDE_MM));
+        announce(F("DRIVE"), SIDE_MM);
       }
       break;
     case 4:

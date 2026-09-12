@@ -1,12 +1,17 @@
-// Routines.cpp - the strategy state machine.
+// generalStrategy.cpp - the strategy state machine. See generalStrategy.h.
 //
 // Several behaviours here look odd but the robot is tuned around them; each is
 // marked KNOWN where it appears. Changing one needs a field test.
+//
+// Every distance handed to the Move library is in MILLIMETRES; the library
+// converts to encoder counts for this robot. "Towards the inside / outside of
+// the field" is move.inner() / move.outer(), mirrored per robot inside the
+// library. A few distances are written per robot (robotSide == LEFT ? a : b)
+// because the tuned distance differs per robot.
 
-#include "Routines.h"
+#include "generalStrategy.h"
 #include "Hardware.h"
 #include "Sensors.h"
-#include "Motion.h"
 
 int routine = 4;
 int state = 0;
@@ -18,9 +23,6 @@ int connections;
 int startTime;
 
 int pesos[NUM_FRANJAS] = {0};
-
-int purpleX = -1;
-int purpleY = -1;
 
 bool lastRoutine = false;
 bool midRoutine = false;
@@ -72,7 +74,7 @@ int classifyLane(float x, float y, bool right) {
 //   1. Quality gate - a blob must be purple, tracked for a couple of frames,
 //      big enough and roughly round. This is the "not a grain of dust" filter.
 //   2. Zone scoring - the blob's bounding box is scored against every
-//      calibrated rectangle in ballZones (RobotConfig.cpp), with
+//      calibrated rectangle in ballZones (Hardware.cpp), with
 //      BALL_ZONE_TOLERANCE px of graded slack around each one. A blob matching
 //      no zone is DISCARDED rather than being forced into a quadrant, which is
 //      what stops the robot from "detecting the ball where it isn't".
@@ -210,14 +212,10 @@ static const __FlashStringHelper *ballZoneName(int zone) {
 }
 
 // Returns the ball position index 0..3, or -1 when no ball could be confirmed.
-// On success purpleX/purpleY hold the centre of the last blob that voted for
-// the winning zone, for the telemetry line.
 static int detectBallZone() {
   int  votes[NUM_BALL_ZONES]  = {0};
   long weight[NUM_BALL_ZONES] = {0};
   bool solid[NUM_BALL_ZONES]  = {false};   // zone has had >=1 centre-inside hit, not just slack
-  int  lastCx[NUM_BALL_ZONES] = {0};       // centre of the last blob that voted for each zone
-  int  lastCy[NUM_BALL_ZONES] = {0};
   bool seenAnything = false;
 
   unsigned long scanStart = millis();
@@ -294,8 +292,6 @@ static int detectBallZone() {
     seenAnything = true;
     votes[frameZone]++;
     weight[frameZone] += frameArea;
-    lastCx[frameZone] = (frameL + frameR) / 2;
-    lastCy[frameZone] = (frameT + frameB) / 2;
     if (frameScore >= 200) solid[frameZone] = true;   // centre truly inside the rectangle
 
     Serial.print(F("blob edges L"));
@@ -340,11 +336,6 @@ static int detectBallZone() {
     }
   }
 
-  if (committed >= 0) {
-    purpleX = lastCx[committed];
-    purpleY = lastCy[committed];
-  }
-
   Serial.print(F("ball scan "));
   Serial.print(millis() - scanStart);
   Serial.print(F(" ms  votes "));
@@ -376,6 +367,8 @@ void handleMicroSwitches() {
   // misbehaves around each wrap. Changing them to unsigned long changes switch
   // timing, so it needs a field test.
   static int microSwitchTime = 0;
+  static bool lastBackSwitchState = HIGH;   // for edge detection
+  static bool lastSideSwitchState = HIGH;   // for edge detection
   int currentTime = millis();
     bool currentBackSwitchState = digitalRead(backSwitchPin);
     bool currentSideSwitchState = digitalRead(sideSwitchPin);
@@ -385,8 +378,9 @@ void handleMicroSwitches() {
       // Handle switch press
       if (currentBackSwitchState == LOW && lastBackSwitchState == HIGH) {
         microSwitchTime = millis();
-        // Button pressed
-        onSwitchPress();
+        // Button pressed: the robot is square against the back wall, so the
+        // heading is zeroed there.
+        headingZero();
         if (!(routine == 6 && state == 2)){
           state++;
         }
@@ -434,21 +428,21 @@ switch (routine) {//------------------------------------------------------------
   case 0:
     switch(state){
       case 0:
-        if(move.backward(mm(100))) state++;
+        if(move.backward(100)) state++;
         break;
       case 1:
         myservo.write(closedGate);
         if(move.stopForMillis(mili)) state++;
         break;
       case 2:
-        if(move.forward(mm(505))) state++;
+        if(move.forward(505)) state++;
         break;
       case 3:
         state++;
         break;
       case 4:
         myservo.write(openGate);
-        if(move.forward(mm(350))) state++;
+        if(move.forward(350)) state++;
         break;
       case 5:
         myservo.write(closedGate);
@@ -464,24 +458,24 @@ switch (routine) {//------------------------------------------------------------
   case 1:
     switch(state){
       case 0:
-        if (move.right(mm(200))) state++;
+        if (move.right(200)) state++;
         break;
       case 1:
-        if(move.backward(mm(100))) state++;
+        if(move.backward(100)) state++;
         break;
       case 2:
         myservo.write(closedGate);
         if(move.stopForMillis(mili)) state++;
         break;
       case 3:
-        if(move.forward(mm(530))) state++;
+        if(move.forward(530)) state++;
         break;
       case 4:
         state++;
         break;
       case 5:
         myservo.write(openGate);
-        if(move.forward(mm(350))) state++;
+        if(move.forward(350)) state++;
         break;
       case 6:
         myservo.write(closedGate);
@@ -495,21 +489,21 @@ switch (routine) {//------------------------------------------------------------
   case 2:
     switch(state){
       case 0:
-        if(move.backward(mm(100))) state++;
+        if(move.backward(100)) state++;
         break;
       case 1:
         myservo.write(openGate);
         if(move.stopForMillis(mili)) state++;
         break;
       case 2:
-        if(move.forward(mm(550))) state++;
+        if(move.forward(550)) state++;
         break;
       case 3:
         state++;
         break;
       case 4:
         myservo.write(closedGate);
-        if(move.forward(mm(250))) state++;
+        if(move.forward(250)) state++;
         break;
       case 5:
         routine = 6; state = 0;
@@ -521,24 +515,24 @@ switch (routine) {//------------------------------------------------------------
   case 3:
     switch(state){
       case 0:
-        if(move.right(mm(200))) state++;
+        if(move.right(200)) state++;
         break;
       case 1:
-        if(move.backward(mm(100))) state++;
+        if(move.backward(100)) state++;
         break;
       case 2:
         myservo.write(openGate);
         if(move.stopForMillis(mili)) state++;
         break;
       case 3:
-        if(move.forward(mm(550))) state++;
+        if(move.forward(550)) state++;
         break;
       case 4:
         state++;
         break;
       case 5:
         myservo.write(closedGate);
-        if(move.forward(mm(250))) state++;
+        if(move.forward(250)) state++;
         break;
       case 6:
         routine = 6; state = 0;
@@ -556,24 +550,23 @@ switch (routine) {//------------------------------------------------------------
       case -1:                //OUTER LANE
         disableDrivers();
         if (robotSide == RIGHT){
-          if(move.rotate(mm(166), false)) state--;
+          if(move.rotate(166, false)) state--;
         }else{
-          if(move.rotate(mm(166), true)) state--;
+          if(move.rotate(166, true)) state--;
         }
         break;
       case -2:
-        // KNOWN: outer() converts with mm() internally, so this is mm(mm(20)),
-        // about 453 counts rather than 95. The robot is tuned around it.
-        if(outer(mm(20))) state--;
+        // KNOWN: per-robot distance the course is tuned around.
+        if(move.outer(robotSide == LEFT ? 95 : 143)) state--;
         break;
       case -3:
         // KNOWN: forwardp returns 2 at 14/22 of the distance and the bare `if`
         // treats that as done, so this state ends at ~255 mm of the 400 with
         // the motors still running; state -4 releases them.
         if (robotSide == RIGHT){
-          if(move.forwardp(mm(400), true)) state--;
+          if(move.forwardp(400, true)) state--;
         }else{
-          if(move.forwardp(mm(400), false)) state--;
+          if(move.forwardp(400, false)) state--;
         }
         break;
       case -4:
@@ -583,24 +576,24 @@ switch (routine) {//------------------------------------------------------------
       case -5:
         disableDrivers();
         if (robotSide == RIGHT){
-          if(move.rotate(mm(166), true)) state--;
+          if(move.rotate(166, true)) state--;
         }else{
-          if(move.rotate(mm(166), false)) state--;
+          if(move.rotate(166, false)) state--;
         }
         break;
       case -6:
-        if(outer(30)) state = 0;
+        if(move.outer(30)) state = 0;
         break;
       case 0:
         enableDrivers();            //MIDDLE LANE
-        if(move.backward(mm(280))) state = 1;
+        if(move.backward(280)) state = 1;
         break;
       case 1:
         if(move.stopForMillis(mili)) state = 2;
         break;
       case 2:
           if (lane == MIDDLE || lane == INNER){
-            int test = move.forwardRegulated(mm(lenght + 50));
+            int test = move.forwardRegulated(lenght + 50);
             switch(test){
               case 1:
                 state++;
@@ -611,7 +604,7 @@ switch (routine) {//------------------------------------------------------------
            }
           } else if(lane == OUTER){
               if (robotSide == RIGHT){
-                int test = move.forwardp(mm(lenght + 50), true);
+                int test = move.forwardp(lenght + 50, true);
                 switch(test){
                   case 1:
                     state++;
@@ -622,7 +615,7 @@ switch (routine) {//------------------------------------------------------------
                 }
 
               }else{
-                int test = move.forwardp(mm(lenght + 50), false);
+                int test = move.forwardp(lenght + 50, false);
                 if (test == 2){enableSlowDrivers();}
                 switch(test){
                   case 1:
@@ -679,19 +672,20 @@ switch (routine) {//------------------------------------------------------------
     enableDrivers();
     switch(state){
       case 0:
-        if(inner(60)) state++;
+        if(move.inner(60)) state++;
         break;
       case 1:
         if(move.stopForMillis(mili)) state++;
         break;
       case 2:
-        if(move.backward(600)) state++;
+        // KNOWN: per-robot distance the course is tuned around.
+        if(move.backward(robotSide == LEFT ? 126 : 84)) state++;
         break;
       case 3:
         if(move.stopForMillis(mili)) state++;
         break;
       case 4:
-        if(move.forward(mm(150))) state++;
+        if(move.forward(150)) state++;
         break;
       case 5:
         state++;
@@ -699,29 +693,27 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 6:
         if (robotSide == RIGHT){
-          if(move.forwardLeft(mm(300))) state++;
+          if(move.forwardLeft(300)) state++;
         } else{
-          if(move.forwardRight(mm(250))) state++;
+          if(move.forwardRight(250)) state++;
         }
-        digitalWrite(LED, HIGH);
         break;
       case 7:
         state++;
         break;
       case 8:
         if (robotSide == RIGHT){
-          if(move.forwardq(mm(lenght/3 + 150), true)){state++;}
+          if(move.forwardq(lenght/3 + 150, true)){state++;}
         } else {
-          if(move.forwardq(mm(lenght/2 + 160), false)){state++;}
+          if(move.forwardq(lenght/2 + 160, false)){state++;}
         }
         break;
       case 9:
         if(move.stopForMillis(2*mili)) state++;
-        digitalWrite(LED, LOW);
         break;
       case 10:
         if (robotSide == LEFT){
-          if(outer(25)) state++;
+          if(move.outer(25)) state++;
         } else{
           state++;
         }
@@ -740,36 +732,36 @@ switch (routine) {//------------------------------------------------------------
     switch(state){
       case -1:
         if (robotSide == RIGHT){
-          if(move.backwardp(mm(lenght), true)) state = 1;
+          if(move.backwardp(lenght, true)) state = 1;
         }else{
-          if(move.backwardp(mm(lenght), false)) state = 1;
+          if(move.backwardp(lenght, false)) state = 1;
         }
         break;
       case 0:
-        if(move.backward(mm(lenght + 250))) state++;
+        if(move.backward(lenght + 250)) state++;
         break;
       case 1:
         if(move.stopForMillis(mili)) state++;
         break;
       case 2:
-        if(outer(750)) state++;
+        if(move.outer(750)) state++;
         break;
       case 3:
         if(move.stopForMillis(mili)) state++;
         break;
       case 4: // Complex logic for Ramp robot redundancy and lane correction
         if (!(lane == OUTER) && first == true){
-          if(inner(180)) state++;
+          if(move.inner(180)) state++;
         } else if (first == true){
           state = 7;
           break;
         }else if(!first){
-          if(inner(180)) state++;
+          if(move.inner(180)) state++;
         }
         pixy.setLamp(0, 0);
         break;
       case 5:
-        if(move.backward(mm(200))) state++;
+        if(move.backward(200)) state++;
         break;
       case 6:
 
@@ -872,42 +864,42 @@ switch (routine) {//------------------------------------------------------------
     connections = 0;
     switch(state){
       case 0:
-        if(move.backward(mm(lenght + 250))) state++;
+        if(move.backward(lenght + 250)) state++;
         break;
       case 1:
         if(move.stopForMillis(mili)) state++;
         break;
       case 2:
-        if(move.forward(80)) state++;
+        // KNOWN: per-robot nudge off the wall the course is tuned around.
+        if(move.forward(robotSide == LEFT ? 17 : 11)) state++;
         break;
       case 3:
         digitalWrite(enable34, LOW);
         if(move.stopForMillis(mili)) state++;
         break;
       case 4:
-        digitalWrite(LED, HIGH);
         if(robotSide == RIGHT){
-          if(move.rotate(mm(146), false)) state++;
+          if(move.rotate(146, false)) state++;
         } else {
-          if(move.rotate(mm(146), true)) state++;
+          if(move.rotate(146, true)) state++;
         }
         break;
       case 5:
         if(move.stopForMillis(mili)) state++;
-        digitalWrite(LED, LOW);
         break;
       case 6:
-        // KNOWN: mm(mm(20)) again, same as routine 4 state -2.
-        if(outer(mm(20))) state++;
+        // KNOWN: per-robot distance the course is tuned around, same as
+        // routine 4 state -2.
+        if(move.outer(robotSide == LEFT ? 95 : 143)) state++;
         break;
       case 7:
         if(move.stopForMillis(mili/2)) state++;
         break;
       case 8:
           if (robotSide == RIGHT){
-            if(move.forwardp(mm(550), true) == 1) state++;
+            if(move.forwardp(550, true) == 1) state++;
           }else{
-            if(move.forwardp(mm(550), false) == 1) state++;
+            if(move.forwardp(550, false) == 1) state++;
           }
         break;
       case 9:
@@ -916,25 +908,24 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 10:
         digitalWrite(enable34, LOW);
-        if(move.backward(20)) state++;
+        // KNOWN: per-robot nudge the course is tuned around.
+        if(move.backward(robotSide == LEFT ? 4 : 3)) state++;
         break;
       case 11:
         if(move.stopForMillis(mili/2)) state++;
         break;
       case 12:
-        digitalWrite(LED, HIGH);
         if(robotSide != RIGHT){
-          if(move.rotate(mm(166), false)) state++;
+          if(move.rotate(166, false)) state++;
         } else {
-          if(move.rotate(mm(166), true)) state++;
+          if(move.rotate(166, true)) state++;
         }
         break;
       case 13:
         if(move.stopForMillis(mili)) state++;
-        digitalWrite(LED, LOW);
         break;
       case 14:
-        if(outer(120)) state++;
+        if(move.outer(120)) state++;
         break;
       case 15:
         if(move.stopForMillis(mili)) state++;
@@ -942,9 +933,9 @@ switch (routine) {//------------------------------------------------------------
       case 16:
         enableDrivers();
         if(robotSide == RIGHT){
-          if(move.rotate(mm(30), true)) state++;
+          if(move.rotate(30, true)) state++;
         } else {
-          if(move.rotate(mm(30), false)) state++;
+          if(move.rotate(30, false)) state++;
         }
         break;
       case 17:
@@ -952,9 +943,9 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 18:
         if(robotSide == LEFT){
-          if(move.rotate(mm(20), true)) state++;
+          if(move.rotate(20, true)) state++;
         } else {
-          if(move.rotate(mm(20), false)) state++;
+          if(move.rotate(20, false)) state++;
         }
         break;
       case 19:
@@ -1007,7 +998,7 @@ switch (routine) {//------------------------------------------------------------
             // The regulator still gets fresh headings (its hook polls the
             // sensor), so the strafe itself stays regulated.
             while (true){
-              if(move.right(mm(moveby))) break;
+              if(move.right(moveby)) break;
             }
             Serial.print("MOVE RIGHT\n");
             pixy.ccc.blocks[maxIndex].print();
@@ -1021,7 +1012,7 @@ switch (routine) {//------------------------------------------------------------
             (robotSide == RIGHT && movement < maxmove))) {
 
             while (true){
-              if(move.left(mm(moveby))) break;
+              if(move.left(moveby)) break;
             }
             Serial.print("MOVE LEFT\n");
             pixy.ccc.blocks[maxIndex].print();
@@ -1049,10 +1040,10 @@ switch (routine) {//------------------------------------------------------------
   case 10:
     switch(state){
       case 0:
-        if(move.backward(mm(50))) state = 1;
+        if(move.backward(50)) state = 1;
         break;
       case 1:
-        if(move.left(mm(500))) state++;
+        if(move.left(500)) state++;
         break;
       case 2:
         if (lastRoutine == false and millis() > 62000){

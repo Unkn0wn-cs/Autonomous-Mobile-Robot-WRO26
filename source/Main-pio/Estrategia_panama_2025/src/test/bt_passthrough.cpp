@@ -9,7 +9,7 @@
 // that, whatever you type is sent to the module as one whole line when you
 // press Enter, and every byte the module sends comes back to the monitor.
 //
-// The competition firmware talks to the module at BLUETOOTH_BAUD (main.cpp),
+// The competition firmware talks to the module at BLUETOOTH_BAUD (Sensors.cpp),
 // 9600 unless changed, which is the factory rate of both modules - so a new
 // module normally needs nothing from here. This is for when it does not
 // answer, was configured by someone before, or you want to rename it, change
@@ -34,7 +34,7 @@
 //     AT+PIN1234    -> OKsetPIN       the pairing PIN
 //     AT+BAUD8      -> OK115200       permanent. The module now talks at
 //                                     115200: set MODULE_BAUD here and
-//                                     BLUETOOTH_BAUD in main.cpp to match.
+//                                     BLUETOOTH_BAUD in Sensors.cpp to match.
 //
 // HC-05 (ZS-040 carrier, has a KEY or EN pin and a small button)
 //   Hold KEY/EN high (or the button down) while powering up: the LED then

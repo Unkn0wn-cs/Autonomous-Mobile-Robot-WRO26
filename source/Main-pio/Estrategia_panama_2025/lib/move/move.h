@@ -9,12 +9,14 @@
 //   motor3   motor4
 //   motor2   motor1
 //
-// Every distance-counted primitive below is NON-BLOCKING: call it every pass of
-// loop() and it returns true once, when the move has finished. It drives the
-// motors through WheelRegulator: the encoders shape the speed over the move,
-// the BNO08x heading PID keeps it straight (see WheelRegulator.h).
+// Every distance-counted primitive below takes its distance in MILLIMETRES
+// (wheel travel, so for rotate() the arc each wheel rolls) and is
+// NON-BLOCKING: call it every pass of loop() and it returns true once, when
+// the move has finished. It drives the motors through WheelRegulator: the
+// encoders shape the speed over the move, the BNO08x heading PID keeps it
+// straight (see WheelRegulator.h).
 //
-// pwmFwd* / pwmStrafe* (pwmf[] / pwms[] in RobotConfig) are used as per-wheel
+// pwmFwd* / pwmStrafe* (pwmf[] / pwms[] in Hardware.h) are used as per-wheel
 // TRIMS: the regulator drives every wheel from a common PWM plus this wheel's
 // difference from the mean of the four.
 //
@@ -23,6 +25,11 @@
 // moveTimeoutMs, whichever comes first. The regulator has already slowed the
 // robot to a creep over the last part of the move, and the motors are braked
 // the moment the count is reached.
+//
+// This library knows nothing about which robot it is on. Everything robot
+// specific - the PWM band, the heading source, the encoder counts per
+// millimetre and which way inner()/outer() strafe - is handed to it by
+// initHardware() (src/Hardware.cpp).
 
 #pragma once
 #include <AFMotor.h>
@@ -37,15 +44,20 @@ class Move {
     // reported as done.
     unsigned long moveTimeoutMs = 4000;
 
+    // Which way inner() strafes: left when true, right when false; outer()
+    // goes the opposite way. Set in initHardware() from robotSide (the RIGHT
+    // robot strafes left for inner(), the LEFT robot right).
+    bool innerIsLeft = true;
+
     // Wall approach. Backward moves (backward, backwardp, backwardLeft,
     // backwardRight) end on the back wall, and the routines command more
     // distance than there is so that the back microswitch, not the count,
     // ends the move. The wall therefore comes BEFORE the target, where the
     // normal profile is still fast. A backward move longer than
-    // longBackwardCounts finishes with backwardEnd instead: a curve of
+    // longBackwardMM finishes with backwardEnd instead: a curve of
     // decelCounts down to endSpeedMMs, held over the last creepCounts, so the
     // wall is met at that speed. Both are set in initHardware().
-    long longBackwardCounts = 0;
+    int longBackwardMM = 0;
     WheelRegulator::EndSpec backwardEnd;
 
     // PWM values for forward/backward
@@ -131,7 +143,8 @@ class Move {
     //
     // forwardp returns 1 when the full distance is reached (and stops), 2 once
     // 14/22 of it is reached (without stopping), 0 otherwise.
-    int forwardp(long pulses, bool position) {
+    int forwardp(int millimetres, bool position) {
+      long pulses = toCounts(millimetres);
       const int d = 9;
       if (position == false){
         armMotion(MOTION_FORWARDP_NEAR, WheelRegulator::Profile, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
@@ -148,7 +161,8 @@ class Move {
     }
 
     // Same 1 / 2 / 0 contract as forwardp, with full regulation.
-    int forwardRegulated(long pulses) {
+    int forwardRegulated(int millimetres) {
+      long pulses = toCounts(millimetres);
       armMotion(MOTION_FORWARD_REGULATED, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
 
       runRegulated(FORWARD, FORWARD, FORWARD, FORWARD);
@@ -159,7 +173,8 @@ class Move {
       } else {return 0;};
     }
 
-    bool backwardp(long pulses, bool position) {
+    bool backwardp(int millimetres, bool position) {
+      long pulses = toCounts(millimetres);
       const int d = 6;
       if (position == false){
         armMotion(MOTION_BACKWARDP_NEAR, WheelRegulator::Profile, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
@@ -171,7 +186,8 @@ class Move {
       return checkDoneWithTimeout(pulses);
     }
 
-    bool forwardq(long pulses, bool position) {
+    bool forwardq(int millimetres, bool position) {
+      long pulses = toCounts(millimetres);
       const int d = 9;
       if (position == false){
         armMotion(MOTION_FORWARDQ_NEAR, WheelRegulator::Profile, pulses, pwmFwd1, pwmFwd2 + d, pwmFwd3 + d, pwmFwd4);
@@ -186,63 +202,87 @@ class Move {
     // ---- Free translations -----------------------------------------------
     // Speed profile + heading hold.
 
-    bool forward(long pulses) {
+    bool forward(int millimetres) {
+      long pulses = toCounts(millimetres);
       armMotion(MOTION_FORWARD, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
       runRegulated(FORWARD, FORWARD, FORWARD, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
-    bool backward(long pulses) {
+    bool backward(int millimetres) {
+      long pulses = toCounts(millimetres);
       armMotion(MOTION_BACKWARD, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
       runRegulated(BACKWARD, BACKWARD, BACKWARD, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }
 
-    bool left(long pulses) {
+    bool left(int millimetres) {
+      long pulses = toCounts(millimetres);
       armMotion(MOTION_LEFT, WheelRegulator::Hold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(BACKWARD, FORWARD, BACKWARD, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
-    bool right(long pulses) {
+    bool right(int millimetres) {
+      long pulses = toCounts(millimetres);
       armMotion(MOTION_RIGHT, WheelRegulator::Hold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(FORWARD, BACKWARD, FORWARD, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }
 
+    // ---- Field-relative strafes ------------------------------------------
+    // left()/right() mirrored on innerIsLeft, so the routines can say
+    // "towards the inside of the field" without working out, every single
+    // time, whether that means left or right for this robot.
+
+    // Strafe towards the inside of the field.
+    bool inner(int millimetres) {
+      return innerIsLeft ? left(millimetres) : right(millimetres);
+    }
+
+    // Strafe towards the outside of the field.
+    bool outer(int millimetres) {
+      return innerIsLeft ? right(millimetres) : left(millimetres);
+    }
+
     // ---- Diagonals -------------------------------------------------------
     // Two wheels drive, two are released. Profile mode, no heading hold.
 
-    bool forwardLeft(long pulses) {
+    bool forwardLeft(int millimetres) {
+      long pulses = toCounts(millimetres);
       armMotion(MOTION_FORWARD_LEFT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(RELEASE, FORWARD, RELEASE, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
-    bool forwardRight(long pulses) {
+    bool forwardRight(int millimetres) {
+      long pulses = toCounts(millimetres);
       armMotion(MOTION_FORWARD_RIGHT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(FORWARD, RELEASE, FORWARD, RELEASE);
       return checkDoneWithTimeout(pulses);
     }
 
-    bool backwardLeft(long pulses) {
+    bool backwardLeft(int millimetres) {
+      long pulses = toCounts(millimetres);
       armMotion(MOTION_BACKWARD_LEFT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(BACKWARD, RELEASE, BACKWARD, RELEASE);
       return checkDoneWithTimeout(pulses);
     }
 
-    bool backwardRight(long pulses) {
+    bool backwardRight(int millimetres) {
+      long pulses = toCounts(millimetres);
       armMotion(MOTION_BACKWARD_RIGHT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(RELEASE, BACKWARD, RELEASE, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     // ---- Rotation --------------------------------------------------------
-    // Encoder-counted turn: speed profile only, heading hold OFF (a turn is
-    // supposed to change the heading).
+    // Encoder-counted turn by `millimetres` of wheel travel: speed profile
+    // only, heading hold OFF (a turn is supposed to change the heading).
     //   side == true   pattern F B B F  (the rotateCCW() pattern)
     //   side == false  pattern B F F B  (the rotateCW()  pattern)
-    bool rotate(long pulses, bool side) {
+    bool rotate(int millimetres, bool side) {
+      long pulses = toCounts(millimetres);
       if (side == true){
         armMotion(MOTION_ROTATE_FBBF, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
         runRegulated(FORWARD, BACKWARD, BACKWARD, FORWARD);
@@ -256,7 +296,7 @@ class Move {
 
     // Open-loop rotation at fixed PWM. Not distance-counted: the caller decides
     // when to stop. The heading reading INCREASES under rotateCW() and
-    // DECREASES under rotateCCW() - see Heading.h.
+    // DECREASES under rotateCCW() - see the heading section of Sensors.h.
     void rotateCW(int pwm, int pwm2, int pwm3, int pwm4) {
       setMotors(BACKWARD, FORWARD, FORWARD, BACKWARD);
       setSpeeds(pwm, pwm2, pwm3, pwm4);
@@ -301,14 +341,6 @@ class Move {
         stopping = false;
         return true; // Done stopping
       }
-    }
-
-    // ---- Units -----------------------------------------------------------
-
-    long mmToPulses(float mm, float wheelDiameterMM, int pulsesPerRevolution) {
-      float circumference = 3.14159265f * wheelDiameterMM;
-      float pulsesPerMM = pulsesPerRevolution / circumference;
-      return static_cast<long>(mm * pulsesPerMM + 0.5f); // rounded
     }
 
     // Front-encoder travel since the current or last move began, in counts:
@@ -376,6 +408,13 @@ class Move {
     uint8_t activeMotion = MOTION_NONE;
     long activeTarget = 0;
 
+    // Millimetres to encoder counts for this robot, rounded to the nearest
+    // count, from regulator.countsPerMM (set in initHardware(): roughly 4.77
+    // counts/mm on LEFT and 7.16 on RIGHT).
+    long toCounts(int millimetres) const {
+      return static_cast<long>(millimetres * regulator.countsPerMM + 0.5f);
+    }
+
     void setMotors(uint8_t m1, uint8_t m2, uint8_t m3, uint8_t m4) {
       motor1.run(m1);
       motor2.run(m2);
@@ -429,7 +468,7 @@ class Move {
 
         // A long backward move finishes with the wall approach.
         WheelRegulator::EndSpec end;
-        if (isBackward(motionId) && targetPulses > longBackwardCounts) end = backwardEnd;
+        if (isBackward(motionId) && targetPulses > toCounts(longBackwardMM)) end = backwardEnd;
         startMove(targetPulses, mode, end);  // zeroes all four wheels, arms the profile
 
         // Translations capture the heading they start on and hold it. A

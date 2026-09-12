@@ -1,4 +1,5 @@
-// Routines.h - the strategy state machine.
+// generalStrategy.h - the strategy state machine: the routines, the purple
+// ball opening, the camera lane choice and the microswitch handling.
 //
 // TWO LEVELS OF STATE:
 //   `routine` picks which strategy is running
@@ -20,7 +21,17 @@
 #pragma once
 
 #include <Arduino.h>
-#include "RobotConfig.h"
+
+// Which lane of the field the robot is currently running. OUTER is furthest
+// from the centre wall, INNER closest; move.inner()/move.outer() translate
+// that into a left or right strafe for this robot.
+enum rlane {
+  OUTER,
+  MIDDLE,
+  INNER
+};
+
+const int mili = 250;     // standard pause between moves, in milliseconds
 
 // ---------------------------------------------------------------------------
 // State machine
@@ -50,11 +61,6 @@ extern int startTime;
 const int NUM_FRANJAS = 3;
 extern int pesos[NUM_FRANJAS];  // accumulated orange blob area per franja
 
-// Where selectOpeningRoutine() last saw the purple ball, in Pixy image pixels.
-// -1,-1 until it is seen. Read by the telemetry line in main.cpp.
-extern int purpleX;
-extern int purpleY;
-
 // ---------------------------------------------------------------------------
 // Endgame timing flags.
 //
@@ -83,7 +89,7 @@ extern bool midRoutineDone;
 int classifyLane(float x, float y, bool right);
 
 // Scans the Pixy for up to 900 ms for the purple ball and picks the opening
-// routine (0-3) from which calibrated zone (ballZones, RobotConfig.cpp) its
+// routine (0-3) from which calibrated zone (ballZones, Hardware.cpp) its
 // bounding box matches, confirmed over several frames by a vote. Gives up
 // after 350 ms if nothing ball-like has been seen. Leaves routine at its
 // default of 4 if no ball is confirmed. Called once from setup().

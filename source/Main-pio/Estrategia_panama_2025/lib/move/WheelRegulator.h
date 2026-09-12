@@ -62,10 +62,10 @@ class WheelRegulator {
     int rampStartPWM = 205;   // where the accel ramp starts: just above breakaway
     int cruisePWM    = 232;   // open-loop cruise
 
-    // Encoder counts per millimetre, so speeds and gains below are in mm/s
-    // whichever robot this is. Set in initHardware().
-    float countsPerMM = 8.754f;
-
+    // Encoder counts per millimetre: every distance Move is given is converted
+    // with it, and the speeds and gains below are in mm/s whichever robot this
+    // is. Placeholder until initHardware() sets it from `pulses` and `diameter`.
+    float countsPerMM = 0;
     // Any move shorter than this is treated as a Burst whatever it asked for.
     long burstThresholdCounts = 200;
 

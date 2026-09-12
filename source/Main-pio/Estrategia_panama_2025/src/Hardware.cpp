@@ -1,10 +1,60 @@
-// Hardware.cpp - construction and control of everything physical.
+// Hardware.cpp - THE ROBOT SELECTOR, then construction and control of
+// everything physical.
+//
+// ###########################################################################
+// #                                                                         #
+// #   TO SWITCH ROBOTS: uncomment ONE block below and comment out the other. #
+// #   This is the only place either robot is selected.                       #
+// #                                                                         #
+// ###########################################################################
+//
+// Leaving both blocks active will not compile (duplicate definitions).
+// Leaving both commented out will not link (undefined references).
 
 #include "Hardware.h"
-#include "RobotConfig.h"
-#include "Heading.h"
+#include "Sensors.h"
 
-int LED = 34;
+// ===========================================================================
+// LEFT - WALL
+// ===========================================================================
+  // int pwmf[4] = {245, 243, 243, 245};
+  // int pwms[4] = {220, 225, 220, 225};
+  // extern const long pulses = 900;  // encoder counts per wheel revolution
+  // side robotSide = LEFT;
+  // int slowRotorSpeed = 90;
+  // int closedGate = 180;
+  // int openGate = 55;
+  // int lenght = 1100;
+  // // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
+  // extern const int ballZones[NUM_BALL_ZONES][4] = {
+  //   { 135,  20,  160,   0 },   // routine 0 - upper left
+  //   { 235,  25,  260,  10 },   // routine 1 - upper right
+  //   { 135,  40,  160,  20 },   // routine 2 - lower left
+  //   { 260,  55,  290,  25 }    // routine 3 - lower right
+  // };
+
+// ===========================================================================
+// RIGHT - RAMP
+// ===========================================================================
+  int pwmf[4] = {220, 243, 243, 220};
+  int pwms[4] = {200, 200, 200, 200};
+  extern const long pulses = 1350;  // encoder counts per wheel revolution
+  side robotSide = RIGHT;
+  int slowRotorSpeed = 180;
+  int closedGate =116;
+  int openGate = 0;
+  int lenght = 640;
+  // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
+  extern const int ballZones[NUM_BALL_ZONES][4] = {
+    { 142,  32,  160,  15 },   // routine 0 - upper left
+    { 245,  33,  260,  20 },   // routine 1 - upper right
+    { 143,  51,  170,  25 },   // routine 2 - lower left
+    { 271,  60,  290,  35 }    // routine 3 - lower right
+  };
+
+// ===========================================================================
+// Everything below is the same on both robots.
+// ===========================================================================
 
 // ---------------------------------------------------------------------------
 // Motors, on the Adafruit Motor Shield v1.
@@ -15,20 +65,8 @@ AF_DCMotor motor2(2); // rear left
 AF_DCMotor motor3(3); // front left
 AF_DCMotor motor4(4); // front right
 
-// ---------------------------------------------------------------------------
-// Encoders. ORDER IS SIGNIFICANT - see the warning in Hardware.h.
-//
-// The front pair measures travelled distance and decides when a move is over;
-// all four feed the mean speed the deceleration loop tracks.
-// ---------------------------------------------------------------------------
-
-Encoders encoderLeft(A15, A14);      // motor3, front left
-Encoders encoderRight(A13, A12);     // motor4, front right
-Encoders encoderRearRight(A11, A10); // motor1, rear right
-Encoders encoderRearLeft(A9, A8);    // motor2, rear left
-
-// Constructed after the motors and encoders above, in the same translation
-// unit, so initialisation order is guaranteed.
+// The Move constructor only stores references to the motors and encoders, so
+// it does not matter that the encoders are constructed in Sensors.cpp.
 Move move(
   motor1, motor2, motor3, motor4,
   encoderRearRight, encoderRearLeft, encoderLeft, encoderRight, // motor1..motor4
@@ -42,7 +80,7 @@ Servo myservo;
 // Rotor speed control.
 //
 // The rotor stores or shoots depending on the gate servo; these three only set
-// how fast it spins. Direction is fixed in initHardware() and never changes.
+// how fast it spins. Direction is fixed in setup() and never changes.
 // ---------------------------------------------------------------------------
 
 void enableSlowDrivers() {
@@ -69,15 +107,24 @@ static float regulatorHeadingError() {
 }
 
 void initHardware() {
+  // Encoder counts per millimetre for this robot. Every distance the Move
+  // library is given in mm - the moves themselves, the regulator's speeds
+  // and the profile lengths below - goes through it, so it is set first.
+  const float countsPerMM = (float)pulses / (3.14159265f * diameter);
+  move.regulator.countsPerMM = countsPerMM;
+
+  // Which way move.inner() strafes on this robot; move.outer() is the other.
+  move.innerIsLeft = (robotSide == RIGHT);
+
   // The movement layer reads heading through these hooks so lib/move stays
-  // independent of the sensor. HEADING_SIGN is applied inside Heading.cpp.
+  // independent of the sensor. HEADING_SIGN is applied inside Sensors.cpp.
   move.setHeadingHooks(&regulatorHeadingError, &headingCaptureTarget);
 
   // PWM levels for these motors: wheels break free at ~200, so the accel ramp
   // starts just above that; 255 is the ceiling. Cruise sits below the ceiling
   // so the heading differential has room before the regulator has to shift
   // the whole set down.
-  move.regulator.maxPWM       = 255;
+  move.regulator.maxPWM       = 248;
   move.regulator.rampStartPWM = 205;
   move.regulator.cruisePWM    = 232;
 
@@ -94,8 +141,6 @@ void initHardware() {
   //          no deceleration and no correction - wall nudges
   //   ramp   the accel ramp length (22 % of the move, clamped to this range)
   //   decel  the closed-loop deceleration length (30 % of the move, clamped)
-  const float countsPerMM = (float)pulses / (3.14159265f * diameter);
-  move.regulator.countsPerMM          = countsPerMM;
   move.regulator.burstThresholdCounts = (long)(30.0f  * countsPerMM);
   move.regulator.minRampCounts        = (long)(25.0f  * countsPerMM);
   move.regulator.maxRampCounts        = (long)(220.0f * countsPerMM);
@@ -107,27 +152,17 @@ void initHardware() {
   // wall comes up to 150 mm early). They brake over 250 mm down to 200 mm/s
   // and hold that speed over the last 150 mm, so the wall is met at 200 mm/s
   // wherever it comes. The hold alone takes 0.75 s of the 4 s moveTimeoutMs;
-  // a slower approach or a longer hold costs more. The threshold is rounded
-  // exactly as mm() rounds, so mm(200) itself is not "longer than 200 mm" on
-  // either robot.
-  move.longBackwardCounts      = move.mmToPulses(200.0f, diameter, pulses);
+  // a slower approach or a longer hold costs more.
+  move.longBackwardMM          = 200;
   move.backwardEnd.decelCounts = (long)(250.0f * countsPerMM);
   move.backwardEnd.creepCounts = (long)(150.0f * countsPerMM);
   move.backwardEnd.endSpeedMMs = 200.0f;
 
-  //servo--------------------------------------------
+  // Gate servo.
   myservo.attach(10);
 
-  //rotor
+  // Rotor L293D.
   pinMode(enable34, OUTPUT);
   pinMode(input3, OUTPUT);
   pinMode(input4, OUTPUT);
-
-  // LED DEBUGER SUPERIOR GRAN RESERVA PRO MAX ROJO TRUMP MAGA UNIMET #FORMAFALICA
-  pinMode(LED, OUTPUT);
-
-  //microSwitch
-  pinMode(backSwitchPin, INPUT_PULLUP);
-  pinMode(sideSwitchPin, INPUT_PULLUP);
-  pinMode(switchPin, INPUT_PULLUP);
 }

@@ -26,8 +26,8 @@ Two sensors, two jobs, no overlap:
 - **BNO08x** says which way the robot points. One PID on its heading error is
   the only thing that keeps the robot straight.
 
-Everything in this file is the code in `lib/move/` and `src/Hardware.cpp`,
-`src/Heading.*`.
+Everything in this file is the code in `lib/move/`, `src/Hardware.*` and the
+heading part of `src/Sensors.*`.
 
 ---
 
@@ -75,18 +75,21 @@ One quadrature encoder per motor, all on PORTK (`A8`–`A15`):
 | `encoderRearLeft` | A9, A8 | motor2, rear left | speed |
 
 The `Encoders` constructor takes its interrupt slot from a **static counter**,
-so the declaration order in `Hardware.cpp` decides which slot each object gets.
-All four are declared in that file, in that order, and must stay there. The
+so the declaration order in `Sensors.cpp` decides which slot each object gets.
+All four are declared in that file, in that order, and must stay together. The
 library counts every edge (x4) and keeps a per-encoder count of skipped
 transitions (`getEncoderErrorCount()`), which `square_test` prints.
 
-`pulses` (RobotConfig) is counts per wheel revolution: 900 on LEFT, 1350 on
-RIGHT. With the 60 mm wheel that is 4.775 counts/mm (LEFT) and 7.162 counts/mm
-(RIGHT). `mm()` in `Motion.cpp` does the conversion; some routine call sites
-pass raw counts instead (`forward(80)`, `backward(600)`, `outer(750)`,
-`inner(180)`).
+`pulses` (`Hardware.h`, per robot) is counts per wheel revolution: 900 on LEFT,
+1350 on RIGHT. With the 60 mm wheel (`diameter`) that is 4.775 counts/mm (LEFT)
+and 7.162 counts/mm (RIGHT). `initHardware()` computes it once into
+`move.regulator.countsPerMM`, and every move converts the millimetres it is
+given into counts with it (rounded to the nearest count). The routines never
+see counts.
 
 ### Other pins
+
+Actuators (`Hardware.h`):
 
 | Pin | Use |
 |---|---|
@@ -94,13 +97,19 @@ pass raw counts instead (`forward(80)`, `backward(600)`, `outer(750)`,
 | 4, 7, 8, 12 | motor shield shift register (CLK, ENABLE, DATA, LATCH) |
 | 9 | rotor L293D enable (`analogWrite`, Timer2) |
 | 10 | gate servo (Servo library, Timer5) |
+| 46, 48 | rotor L293D input4 / input3 |
+
+Sensors (`Sensors.h`):
+
+| Pin | Use |
+|---|---|
 | 14 | start switch |
-| 16, 17 | Serial2 TX2 / RX2 — Bluetooth telemetry module |
 | 18, 19 | back / side microswitches (polled) |
 | 20, 21 | I2C: BNO08x |
-| 34 | debug LED |
-| 46, 48 | rotor L293D input4 / input3 |
 | 50–53 | SPI: Pixy2 (SS = 53) |
+| A8–A15 | the four encoders |
+
+Serial2 on 16, 17 (TX2 / RX2) carries the Bluetooth telemetry (`Sensors.cpp`).
 
 ### Timers
 
@@ -119,13 +128,14 @@ Attaching a 13th servo would take Timer1 and silently kill motor1.
 
 ## 3. Which robot am I building?
 
-Exactly one block in `src/RobotConfig.cpp` is uncommented. Everything that
-differs between the robots lives there: `pwmf`, `pwms`, `pulses`, `robotSide`,
-`slowRotorSpeed`, `closedGate`, `openGate`. `lenght` is defined outside both
-blocks and assigned in `setup()`.
+Exactly one block at the top of `src/Hardware.cpp` is uncommented. Everything
+that differs between the robots lives there: `pwmf`, `pwms`, `pulses`,
+`robotSide`, `slowRotorSpeed`, `closedGate`, `openGate`, `lenght` and the
+purple-ball `ballZones`.
 
 `robotSide` is the master switch: the routines mirror left/right decisions on
-it, and `inner()` / `outer()` translate "towards the centre wall" into a
+it, and `initHardware()` sets `move.innerIsLeft` from it so that
+`move.inner()` / `move.outer()` translate "towards the centre wall" into a
 physical strafe direction per robot.
 
 ---
@@ -134,14 +144,19 @@ physical strafe direction per robot.
 
 ### The non-blocking contract
 
-Every distance-counted primitive is called every pass of `loop()` and returns
-`true` once, when the move has finished.
+Every distance-counted primitive takes its distance in millimetres of wheel
+travel, is called every pass of `loop()` and returns `true` once, when the
+move has finished.
 
-- **First call** (`armMotion`): record which motion and target this is, zero the
-  four wheel start counts, arm the regulator with the target and mode (a
-  backward move longer than `longBackwardCounts` also passes `backwardEnd`,
-  the wall approach in §5), capture the heading to hold (translations only —
-  a rotation is meant to change it), stamp `moveStartTime`.
+- **Every call, first thing** (`toCounts`): the millimetres become encoder
+  counts, `mm × regulator.countsPerMM + 0.5` truncated, i.e. the nearest
+  count. Everything below works in counts.
+- **First call** (`armMotion`): record which motion and target this is, zero
+  the four wheel start counts, arm the regulator with the target and mode (a
+  backward move longer than `longBackwardMM` — converted the same way — also
+  passes `backwardEnd`, the wall approach in §5), capture the heading to hold
+  (translations only — a rotation is meant to change it), stamp
+  `moveStartTime`.
 - **Every call** (`runRegulated`): assert the direction pattern, give the
   regulator each wheel's travel (|counts| since the move began), whether it is
   driven, and its direction sign; feed it the fresh BNO08x error; take the four
@@ -255,13 +270,13 @@ so the robot is at 200 mm/s from 150 mm before the target onwards and meets
 the wall at that speed wherever it comes. `creepCounts` is clamped to 60 % of
 the move and `decelCounts` to what is left after the accel ramp and the creep;
 for the 890 mm reverses that is ramp 196 → cruise 294 → curve 250 → hold 150,
-for `backward(mm(280))` ramp 62 → curve 68 → hold 150. The hold alone takes
+for `backward(280)` ramp 62 → curve 68 → hold 150. The hold alone takes
 0.75 s of the 4 s `moveTimeoutMs`.
 
-`Move::longBackwardCounts` (200 mm) is rounded exactly as `mm()` rounds, so
-`backward(mm(200))` and everything shorter keep the normal profile. An
-`EndSpec` with every field at 0 (the default `begin()` argument) is the normal
-profile.
+`Move::longBackwardMM` (200) is compared in counts, converted the same way the
+move's own distance is, so `backward(200)` and everything shorter keep the
+normal profile. An `EndSpec` with every field at 0 (the default `begin()`
+argument) is the normal profile.
 
 A PI loop tracks it with the common PWM: `common = 0.15 · e + I`, `e = vCmd −
 vMeasured` in mm/s, `I` integrating at 2.0 PWM/(mm/s)/s from the PWM in force
@@ -274,7 +289,7 @@ speed, so it is the same on either robot. The robot arrives at creep speed and
 
 ### Heading PID (BNO08x)
 
-In `Hold` mode only. The error comes from `Heading.cpp`: degrees from the
+In `Hold` mode only. The error comes from `Sensors.cpp`: degrees from the
 heading captured when the move began, −180..+180, sign convention below.
 
 | Term | Value | Notes |
@@ -310,7 +325,7 @@ pattern, so a positive error is corrected by a positive differential.
 
 ---
 
-## 6. Heading: `src/Heading.*`
+## 6. Heading: the BNO08x part of `src/Sensors.*`
 
 ### Sensor
 
@@ -340,14 +355,14 @@ readings even inside code that does not return to `loop()` between passes
 | Reference | Set by | Read by |
 |---|---|---|
 | **target** | `armMotion()` at the start of every translation | `headingError()` → regulator |
-| **zero** | `onSwitchPress()` — back microswitch, robot square on the wall | `headingSinceZero()`, heading relative to that wall |
+| **zero** | `handleMicroSwitches()` on a back microswitch press — robot square on the wall | `headingSinceZero()`, heading relative to that wall |
 | **boot** | `headingBegin()` | `headingSinceBoot()` → telemetry `deg` |
 
 A rotation captures nothing; the translation after it captures the new heading.
 
 ### Sign convention
 
-`HEADING_SIGN` (Heading.cpp, `−1.0f`) is applied to every heading difference.
+`HEADING_SIGN` (Sensors.cpp, `−1.0f`) is applied to every heading difference.
 It is chosen so that the reading **increases** under the `B F F B` pattern
 (`rotate(x, false)`, `rotateCW()`) and **decreases** under `F B B F`
 (`rotate(x, true)`, `rotateCCW()`). The regulator depends on exactly that: its
@@ -355,7 +370,7 @@ positive differential drives the `F B B F` direction and must lower a positive
 error.
 
 `square_test` measures each turn against the pattern it used and prints
-`SIGN: OK` or `SIGN: FLIP HEADING_SIGN in Heading.cpp`.
+`SIGN: OK` or `SIGN: FLIP HEADING_SIGN in Sensors.cpp`.
 
 ### Fail-safes
 
@@ -395,12 +410,14 @@ run re-references the heading mid-move and points at a supply problem.
 
 ## 8. Changing this code safely
 
-1. Everything in `Routines.cpp` marked `KNOWN` is behaviour the robot is tuned
-   around. Changing one means re-running the course.
-2. Distances tuned into the routines are in front-encoder counts. Keeping
-   completion on the front pair keeps them meaningful.
+1. Everything in `generalStrategy.cpp` marked `KNOWN` is behaviour the robot
+   is tuned around. Changing one means re-running the course.
+2. Distances in the routines are millimetres; the library converts them with
+   `regulator.countsPerMM` and measures completion on the front encoder pair.
+   Keep both, or the tuned numbers stop meaning what they mean.
 3. Any new directional logic must branch on `robotSide`.
-4. Do not reorder or move the four `Encoders` declarations.
+4. Do not reorder the four `Encoders` declarations in `Sensors.cpp` or split
+   them across files.
 5. Do not attach more servos or take a timer (see §2).
 6. `runRoutines()` stays the last call in `loop()`.
 7. New test programs go in `src/test/` with their own `[env:...]` in
