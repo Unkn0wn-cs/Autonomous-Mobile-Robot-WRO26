@@ -53,7 +53,7 @@ const byte switchPin     = 14;
 //
 //         FRONT
 //    motor3   motor4     <- front pair, these two measure distance
-//    motor2   motor1     <- rear pair, synchronisation only
+//    motor2   motor1     <- rear pair, speed measurement only
 //         BACK
 // ---------------------------------------------------------------------------
 
@@ -68,8 +68,8 @@ extern AF_DCMotor motor4;
 // Do not reorder them, and do not move them to another file.
 extern Encoders encoderLeft;       // motor3, front left  - measures distance
 extern Encoders encoderRight;      // motor4, front right - measures distance
-extern Encoders encoderRearRight;  // motor1, rear right  - sync only
-extern Encoders encoderRearLeft;   // motor2, rear left   - sync only
+extern Encoders encoderRearRight;  // motor1, rear right  - speed only
+extern Encoders encoderRearLeft;   // motor2, rear left   - speed only
 
 extern Move move;
 

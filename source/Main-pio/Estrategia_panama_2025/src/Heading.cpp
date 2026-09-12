@@ -39,7 +39,7 @@ static const uint8_t  POLL_INTERVAL_MS   = 2;
 
 // Staleness thresholds - see FAIL-SAFES in Heading.h.
 static const unsigned long STALE_FOR_HOLD_MS     = 100;
-static const unsigned long STALE_FOR_ROUTINES_MS = 1000;
+static const unsigned long STALE_FOR_AVAILABLE_MS = 1000;
 
 static Adafruit_BNO08x   bno(RESET_PIN);
 static sh2_SensorValue_t event;
@@ -154,7 +154,7 @@ static bool freshWithin(unsigned long ms) {
   return present && haveFirst && (millis() - lastReport) <= ms;
 }
 
-bool     headingAvailable() { return freshWithin(STALE_FOR_ROUTINES_MS); }
+bool     headingAvailable() { return freshWithin(STALE_FOR_AVAILABLE_MS); }
 float    headingNow()       { return current; }
 uint8_t  headingAddress()   { return foundAddress; }
 uint8_t  headingAccuracy()  { return accuracy; }

@@ -19,7 +19,7 @@ AF_DCMotor motor4(4); // front right
 // Encoders. ORDER IS SIGNIFICANT - see the warning in Hardware.h.
 //
 // The front pair measures travelled distance and decides when a move is over;
-// all four take part in wheel synchronisation.
+// all four feed the mean speed the deceleration loop tracks.
 // ---------------------------------------------------------------------------
 
 Encoders encoderLeft(A15, A14);      // motor3, front left
@@ -73,21 +73,47 @@ void initHardware() {
   // independent of the sensor. HEADING_SIGN is applied inside Heading.cpp.
   move.setHeadingHooks(&regulatorHeadingError, &headingCaptureTarget);
 
-  // Usable PWM band for these motors: wheels break free at ~200, 255 is the
-  // ceiling. Cruise sits inside the band so the regulator can push a wheel up
-  // as well as slow it down.
-  move.regulator.minMovePWM   = 200;
+  // PWM levels for these motors: wheels break free at ~200, so the accel ramp
+  // starts just above that; 255 is the ceiling. Cruise sits below the ceiling
+  // so the heading differential has room before the regulator has to shift
+  // the whole set down.
   move.regulator.maxPWM       = 255;
   move.regulator.rampStartPWM = 205;
   move.regulator.cruisePWM    = 232;
 
-  // Moves shorter than the burst threshold skip the ramp and regulation and run
-  // straight at cruise - the wall does the aligning on those. All three are in
-  // mm because the two robots count very differently per millimetre.
+  // Heading hold: PWM of differential per degree, and the most it may apply.
+  // Proportional only for the first run; see WheelRegulator.h for I and D.
+  move.regulator.kHeadingP            = 12.0f;
+  move.regulator.kHeadingI            = 0.0f;
+  move.regulator.kHeadingD            = 0.0f;
+  move.regulator.maxHeadingCorrection = 40;
+
+  // Distances the regulator works in, given in mm because the two robots count
+  // very differently per millimetre.
+  //   burst  moves shorter than this run straight at cruise with no ramp,
+  //          no deceleration and no correction - wall nudges
+  //   ramp   the accel ramp length (22 % of the move, clamped to this range)
+  //   decel  the closed-loop deceleration length (30 % of the move, clamped)
   const float countsPerMM = (float)pulses / (3.14159265f * diameter);
-  move.regulator.burstThresholdCounts = (long)(120.0f * countsPerMM);
+  move.regulator.countsPerMM          = countsPerMM;
+  move.regulator.burstThresholdCounts = (long)(30.0f  * countsPerMM);
   move.regulator.minRampCounts        = (long)(25.0f  * countsPerMM);
   move.regulator.maxRampCounts        = (long)(220.0f * countsPerMM);
+  move.regulator.minDecelCounts       = (long)(40.0f  * countsPerMM);
+  move.regulator.maxDecelCounts       = (long)(200.0f * countsPerMM);
+
+  // Wall approach: backward moves longer than 200 mm meet the back wall
+  // before their commanded distance (routine 6 reverses lenght + 250, the
+  // wall comes up to 150 mm early). They brake over 250 mm down to 200 mm/s
+  // and hold that speed over the last 150 mm, so the wall is met at 200 mm/s
+  // wherever it comes. The hold alone takes 0.75 s of the 4 s moveTimeoutMs;
+  // a slower approach or a longer hold costs more. The threshold is rounded
+  // exactly as mm() rounds, so mm(200) itself is not "longer than 200 mm" on
+  // either robot.
+  move.longBackwardCounts      = move.mmToPulses(200.0f, diameter, pulses);
+  move.backwardEnd.decelCounts = (long)(250.0f * countsPerMM);
+  move.backwardEnd.creepCounts = (long)(150.0f * countsPerMM);
+  move.backwardEnd.endSpeedMMs = 200.0f;
 
   //servo--------------------------------------------
   myservo.attach(10);

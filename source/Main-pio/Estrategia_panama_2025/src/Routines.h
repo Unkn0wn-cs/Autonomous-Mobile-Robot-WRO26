@@ -5,12 +5,11 @@
 //   `state`   steps through that strategy
 // Both are plain globals and transitions are plain assignments.
 //
-//   routine 0-3   opening purple ball handling, one per camera quadrant
+//   routine 0-3   opening purple ball handling, one per calibrated ball zone
 //   routine 4     main lane loop
 //   routine 5     diagonal lane
 //   routine 6     return, then camera weighting picks the next lane
-//   routine 7     corner checking reset, rotates on the heading sensor
-//   routine 8     reorient to 0 degrees, then falls through into routine 9
+//   routine 7     corner checking reset, encoder-counted turns
 //   routine 9     parking / Pixy ball tracking
 //   routine 10    debugging
 //
@@ -33,9 +32,6 @@ extern int state;    // step within that strategy. Routine 4 counts DOWN for the
 extern bool first;   // true until the first full lap has been set up
 extern rlane lane;   // which lane the robot is currently committed to
 
-extern int beta;   // heading tolerance in degrees
-extern int alpha;  // heading target in degrees
-
 // Limits the camera lane decision to twice per corner reset. Reset to 0 on
 // every pass through routine 7.
 extern int connections;
@@ -53,6 +49,11 @@ extern int startTime;
 
 const int NUM_FRANJAS = 3;
 extern int pesos[NUM_FRANJAS];  // accumulated orange blob area per franja
+
+// Where selectOpeningRoutine() last saw the purple ball, in Pixy image pixels.
+// -1,-1 until it is seen. Read by the telemetry line in main.cpp.
+extern int purpleX;
+extern int purpleY;
 
 // ---------------------------------------------------------------------------
 // Endgame timing flags.
@@ -81,9 +82,11 @@ extern bool midRoutineDone;
 // to use.
 int classifyLane(float x, float y, bool right);
 
-// Scans up to 120 Pixy frames for the purple ball and picks the opening routine
-// (0-3) from which quadrant it is in. Leaves routine at its default of 4 if no
-// ball is found. Called once from setup().
+// Scans the Pixy for up to 900 ms for the purple ball and picks the opening
+// routine (0-3) from which calibrated zone (ballZones, RobotConfig.cpp) its
+// bounding box matches, confirmed over several frames by a vote. Gives up
+// after 350 ms if nothing ball-like has been seen. Leaves routine at its
+// default of 4 if no ball is confirmed. Called once from setup().
 void selectOpeningRoutine();
 
 // Edge detects the two microswitches and advances `state`. A back switch press

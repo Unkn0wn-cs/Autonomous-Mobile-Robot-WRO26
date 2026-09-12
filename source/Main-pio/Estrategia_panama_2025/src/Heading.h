@@ -8,26 +8,28 @@
 // would corrupt a magnetometer. Heading is therefore RELATIVE to power-on,
 // which is all "drive straight" and "turn 80 degrees" need.
 //
-// SIGN CONVENTION (shared by the regulator and the routines):
-//   the reading INCREASES when the wheels run the rotateCW() pattern
-//   (m1 B, m2 F, m3 F, m4 B) and DECREASES for rotateCCW() (F, B, B, F).
-//   Routines 7/8 and the heading-hold loop both depend on this. square_test
-//   prints a verdict after every turn; if it says FLIP, change HEADING_SIGN in
-//   Heading.cpp.
+// The sensor is used to hold a heading while the robot translates. Turning
+// is done by encoder count (move.rotate()); the sensor never drives a turn.
 //
-// Three reference points are kept, because three parts of the firmware need
-// different ones:
+// SIGN CONVENTION:
+//   the reading INCREASES when the wheels run the B F F B rotation pattern
+//   (rotate(x, false)) and DECREASES for F B B F (rotate(x, true)). The
+//   heading-hold loop depends on this: its positive differential drives
+//   F B B F and must lower a positive error. square_test prints a verdict after
+//   every turn; if it says FLIP, change HEADING_SIGN in Heading.cpp.
+//
+// Three reference points are kept:
 //   TARGET  captured at the start of every straight or strafe by move.h, so the
 //           regulator can hold the heading that move began on.
 //   ZERO    set when the back microswitch confirms the robot is square against
-//           a wall, so routines 7 and 8 can turn a known angle away from it.
+//           a wall; headingSinceZero() is the heading relative to that wall.
 //   BOOT    the heading at power-on. Only the telemetry line reads it, to show
 //           how far the robot has turned since it was switched on.
 //
 // FAIL-SAFES:
 //   * no report for 100 ms  -> headingError() returns 0 (heading hold idles)
-//   * no report for 1000 ms -> headingAvailable() returns false (routines 7/8
-//                              fall back to encoder-counted turns)
+//   * no report for 1000 ms -> headingAvailable() returns false; the
+//                              since-zero / since-boot readings return 0
 //   * sensor reset          -> its reference frame is new, so all three
 //                              references are re-captured from the first
 //                              report after it

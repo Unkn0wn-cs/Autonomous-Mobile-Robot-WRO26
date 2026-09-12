@@ -2,25 +2,37 @@
 //
 // Team Outer Heaven - WRO 2026.
 //
-// Every regulated move does three independent things, each measured by a
-// different sensor so they do not fight each other:
+// Two sensors, two jobs:
 //
-//   1. SPEED SHAPING   ramp the PWM in at the start and out at the end.
-//                      Driven by encoder distance.
-//   2. WHEEL SYNC      hold each wheel to the mean travel of the others.
-//                      Symmetric about the mean, so it never changes the
-//                      robot's overall speed. Encoders.
-//   3. HEADING HOLD    PID on the BNO08x heading error, applied as a rotation
-//                      superimposed on the translation. Only this loop is
-//                      allowed to rotate the robot.
+//   ENCODERS  distance travelled -> which phase of the move we are in
+//             (accel / cruise / decel) and, in decel, the mean speed the
+//             speed loop tracks. Nothing else. The encoders never steer.
 //
-// The PWM band (minMovePWM..maxPWM), the ramp start and the cruise value are
-// set in initHardware(). Cruise sits inside the band so a wheel can be pushed
-// up as well as slowed down.
+//   BNO08x    heading error -> a PID whose output is a PWM DIFFERENTIAL
+//             between the two wheel pairs. This is the only thing that keeps
+//             the robot straight.
+//
+// Every tick the four wheel PWMs are
+//
+//   pwm_i = common + trim_i + differential * ROT_i * dirSign_i
+//
+//   common        the speed profile: an open-loop ramp from rampStartPWM to
+//                 cruisePWM while accelerating (the wheels need ~200 to break
+//                 free), cruisePWM, then a closed-loop deceleration to a creep
+//                 at the target (or, for a move that meets a wall before its
+//                 target, to an approach speed held over the last part)
+//   trim_i        this wheel's static offset from the mean of pwmf[]/pwms[]
+//   differential  the heading PID output, +-maxHeadingCorrection
+//   ROT           {+1, -1, -1, +1}: wheels 1 and 4 against 2 and 3, i.e. the
+//                 F B B F rotation pattern
+//   dirSign_i     +1 forward, -1 backward, 0 released, so the same
+//                 differential turns the robot the same way whatever the move
+//
+// The differential is never clipped: if a wheel would exceed maxPWM the whole
+// set is shifted down instead, so a correction always arrives in full.
 //
 // This class does not decide when a move is finished - move.h does that from
-// the front encoders, so every distance tuned into the routines keeps its
-// meaning.
+// the front encoders and brakes at the target.
 
 #pragma once
 
@@ -32,46 +44,75 @@ class WheelRegulator {
 
     // How much control a move asks for.
     enum Mode {
-      // Short nudges, usually finishing against a wall. Straight to cruise PWM,
-      // no ramp and no correction: the wall does the aligning.
+      // Very short nudges, usually finishing against a wall. Straight to cruise
+      // PWM, no profile and no correction: the wall does the aligning.
       Burst,
-      // Ramp only. For moves that deliberately drive the wheels at different
-      // speeds (forwardp/backwardp press the robot into a wall), where sync
-      // and heading hold would cancel the very thing that makes them work.
-      Ramp,
-      // Ramp, wheel sync and heading hold. For real travel.
-      Full
+      // Speed profile only, no heading hold. Wall-hugging straights (the wall
+      // aligns them), diagonals, and rotations (a turn is meant to change the
+      // heading).
+      Profile,
+      // Speed profile and heading hold. Every free translation.
+      Hold
     };
 
-    // ---- The hardware band (overridden in initHardware()) ------------------
-    int minMovePWM   = 200;   // below this the wheels do not turn
-    int maxPWM       = 255;
-    int rampStartPWM = 205;   // where the ramp starts, just above the threshold
-    int cruisePWM    = 232;   // regulated cruise, mid-band
+    enum Phase { Accel, Cruise, Decel };
 
-    // Any move shorter than this is treated as a Burst whatever it asked for:
-    // there is no room to ramp over a few dozen counts. Set from mm in
-    // initHardware().
+    // ---- PWM levels (overridden in initHardware()) ---------------------------
+    int maxPWM       = 248;
+    int rampStartPWM = 205;   // where the accel ramp starts: just above breakaway
+    int cruisePWM    = 232;   // open-loop cruise
+
+    // Encoder counts per millimetre, so speeds and gains below are in mm/s
+    // whichever robot this is. Set in initHardware().
+    float countsPerMM = 8.754f;
+
+    // Any move shorter than this is treated as a Burst whatever it asked for.
     long burstThresholdCounts = 200;
 
-    // ---- Speed shaping -----------------------------------------------------
-    // Fraction of the move spent easing in, and easing out. Clamped between
-    // minRampCounts and maxRampCounts (set from mm in initHardware()).
+    // ---- Accel -------------------------------------------------------------
+    // Fraction of the move spent ramping up, clamped to min/maxRampCounts and
+    // to 45 % of the move.
     float rampFraction = 0.22f;
     long  minRampCounts = 40;
     long  maxRampCounts = 1500;
 
-    // ---- Wheel synchronisation (encoders) ----------------------------------
-    // PWM per encoder count that a wheel differs from the mean of the others.
-    float kSync = 0.30f;
-    int   maxSyncCorrection = 12;
+    // ---- Decel (closed loop on mean encoder speed) -------------------------
+    // Fraction of the move over which the robot slows down, clamped to
+    // min/maxDecelCounts and to 50 % of the move.
+    float decelFraction = 0.30f;
+    long  minDecelCounts = 300;
+    long  maxDecelCounts = 1700;
+
+    // Creep speed at the target: a fraction of the speed the robot had when
+    // deceleration began, but never below minEndSpeedMMs so it always gets
+    // there.
+    float endSpeedFraction = 0.15f;
+    float minEndSpeedMMs   = 40.0f;
+
+    // How one move finishes, passed to begin(). Every field at 0 gives the
+    // rules above. A move that must be slow BEFORE its target (a backward move
+    // meeting the back wall short of the commanded distance, see move.h) sets
+    // them: a curve of decelCounts down to endSpeedMMs, then that speed held
+    // over the last creepCounts. creepCounts is clamped to 60 % of the move
+    // and decelCounts to what is left after the accel ramp and the creep.
+    struct EndSpec {
+      long  decelCounts;   // length of the deceleration curve; 0 = decelFraction rule
+      long  creepCounts;   // end speed held over the last this many counts
+      float endSpeedMMs;   // speed at the end of the curve; 0 = endSpeedFraction rule
+      EndSpec() : decelCounts(0), creepCounts(0), endSpeedMMs(0.0f) {}
+    };
+
+    // Speed loop: common PWM = kSpeedP * error + integral, error in mm/s.
+    float kSpeedP = 0.15f;   // PWM per mm/s
+    float kSpeedI = 2.0f;    // PWM per mm/s per second
+
+    // Extra PWM per tick added while the robot is below half the creep speed
+    // but asked to move, so a wheel that stalls on a low PWM is freed quickly.
+    int stallEscapePWM = 2;
 
     // ---- Heading hold (BNO08x) ---------------------------------------------
-    // PWM of differential correction per degree of heading error.
-    // I and D are 0: the loop is proportional-only while the P response is
-    // being observed on the floor. Starting points when enabling them:
-    // kHeadingI 3.0, kHeadingD 0.6.
-    float kHeadingP = 9.0f;
+
+    float kHeadingP = 12.0f;
     float kHeadingI = 0.0f;
     float kHeadingD = 0.0f;
 
@@ -80,19 +121,18 @@ class WheelRegulator {
     // deadband is a step, and a derivative of a step spikes.
     float headingDeadbandDeg = 0.12f;
 
-    int   maxHeadingCorrection = 20;
-    float headingIntegralLimit = 8.0f;   // in PWM
+    int   maxHeadingCorrection = 40;     // PWM, per wheel pair
+    float headingIntegralLimit = 12.0f;  // PWM
 
     // Fed in by move.h every tick from the BNO08x; 0 when there is no sensor,
     // in which case heading hold simply does nothing.
     float headingErrorDeg = 0.0f;
-    bool  headingHoldEnabled = false;
 
     // Control period. dt is measured, so the gains hold if a tick runs late.
     uint8_t updateIntervalMs = 4;
 
     // ------------------------------------------------------------------------
-    void begin(long targetCounts, Mode mode = Full) {
+    void begin(long targetCounts, Mode mode = Hold, EndSpec end = EndSpec()) {
       _target = targetCounts > 0 ? targetCounts : 0;
 
       _mode = mode;
@@ -105,14 +145,40 @@ class WheelRegulator {
       if (ramp > half) ramp = half;
       _rampCounts = ramp;
 
+      long creep = end.creepCounts > 0 ? end.creepCounts : 0;
+      long creepMax = (long)(_target * 0.6f);
+      if (creep > creepMax) creep = creepMax;
+      _creepCounts = creep;
+
+      long decel;
+      if (end.decelCounts > 0) {
+        decel = end.decelCounts;
+      } else {
+        decel = (long)(_target * decelFraction);
+        if (decel < minDecelCounts) decel = minDecelCounts;
+        if (decel > maxDecelCounts) decel = maxDecelCounts;
+        if (decel > _target / 2) decel = _target / 2;
+      }
+      long room = _target - _rampCounts - _creepCounts;
+      if (decel > room) decel = room;
+      if (decel < 0) decel = 0;
+      _decelCounts = decel;
+
+      _endSpeedMMs = end.endSpeedMMs > 0.0f ? end.endSpeedMMs : 0.0f;
+
+      _phase   = Accel;
       _profile = 0.0f;
+      _common  = (_mode == Burst) ? (float)cruisePWM : (float)rampStartPWM;
+      _speed = 0.0f; _lastMeanProg = 0.0f;
+      _vPeak = 0.0f; _vEnd = 0.0f; _vCmd = 0.0f;
+      _speedI = _common;
+
       _headingI = 0.0f;
       _lastHeadingErr = 0.0f;
       _headingD = 0.0f;
       _headingCorr = 0.0f;
 
       for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
-        _sync[i] = 0.0f;
         _dirSign[i] = 1;
         _prog[i] = 0;
       }
@@ -148,63 +214,79 @@ class WheelRegulator {
 
       if (_mode == Burst) {
         _profile = 1.0f;
+        _common = (float)cruisePWM;
         _headingCorr = 0.0f;
-        for (uint8_t i = 0; i < WHEEL_COUNT; i++) _sync[i] = 0.0f;
         return;
       }
 
-      // ---- 1. speed shaping ------------------------------------------------
-      long furthest = 0;
+      // ---- Speed profile (encoders) --------------------------------------
       long sum = 0; uint8_t n = 0;
       for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
         if (!driven[i]) continue;
-        if (progress[i] > furthest) furthest = progress[i];
         sum += progress[i]; n++;
       }
       float mean = n ? (float)sum / (float)n : 0.0f;
+      long travelled = (long)mean;
 
-      _profile = rampProfile(furthest);
+      // Mean speed of the driven wheels, counts/s, lightly filtered.
+      float vRaw = (mean - _lastMeanProg) / dt;
+      _lastMeanProg = mean;
+      _speed = 0.75f * _speed + 0.25f * vRaw;
 
-      // ---- 2. wheel synchronisation ---------------------------------------
-      // Deviations are measured against the mean, so they sum to zero and a
-      // correction only shares speed out differently. Ramp mode skips this.
-      if (_mode == Full) {
-        for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
-          if (!driven[i]) { _sync[i] = 0.0f; continue; }
-          float dev = mean - (float)progress[i];      // + when this wheel is behind
-          float c = kSync * dev;
-          if (c >  (float)maxSyncCorrection) c =  (float)maxSyncCorrection;
-          if (c < -(float)maxSyncCorrection) c = -(float)maxSyncCorrection;
-          _sync[i] = c;
+      long remaining = _target - travelled;
+      if (remaining < 0) remaining = 0;
+
+      if (_phase != Decel && remaining <= _decelCounts + _creepCounts) {
+        _phase = Decel;
+        _vPeak = _speed;
+        if (_endSpeedMMs > 0.0f) {
+          _vEnd = _endSpeedMMs * countsPerMM;
+        } else {
+          _vEnd = endSpeedFraction * _vPeak;
+          float creep = minEndSpeedMMs * countsPerMM;
+          if (_vEnd < creep) _vEnd = creep;
         }
-
-        // A heading correction makes two wheels travel further than the other
-        // two on purpose. Left alone, the sync loop would see that as an error
-        // and pull them back - two loops, opposite commands, same motors. So
-        // the rotation component is projected out of the sync correction and
-        // rotation is left entirely to the heading loop, which measures it.
-        if (headingHoldEnabled) {
-          static const int8_t ROT[WHEEL_COUNT] = {1, -1, -1, 1};
-          float dot = 0.0f; uint8_t m = 0;
-          for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
-            if (!driven[i]) continue;
-            dot += _sync[i] * (float)ROT[i] * (float)dirSign[i];
-            m++;
-          }
-          if (m > 0) {
-            dot /= (float)m;
-            for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
-              if (!driven[i]) continue;
-              _sync[i] -= dot * (float)ROT[i] * (float)dirSign[i];
-            }
-          }
-        }
-      } else {
-        for (uint8_t i = 0; i < WHEEL_COUNT; i++) _sync[i] = 0.0f;
+        _speedI = _common;               // bumpless: continue from the PWM in force
       }
 
-      // ---- 3. heading hold -------------------------------------------------
-      if (_mode == Full && headingHoldEnabled) {
+      if (_phase == Accel) {
+        _profile = smoothstep((float)travelled / (float)_rampCounts);
+        _common  = (float)rampStartPWM + ((float)cruisePWM - (float)rampStartPWM) * _profile;
+        if (_profile >= 1.0f) _phase = Cruise;
+      } else if (_phase == Cruise) {
+        _profile = 1.0f;
+        _common  = (float)cruisePWM;
+      } else {
+        // Constant deceleration: speed falls with the square root of the
+        // distance still to go, from vPeak at the start of the phase to vEnd
+        // at the start of the creep zone (at the target when there is none),
+        // then vEnd is held.
+        long toCreep = remaining - _creepCounts;
+        if (toCreep < 0) toCreep = 0;
+        float frac = (_decelCounts > 0) ? sqrt((float)toCreep / (float)_decelCounts) : 0.0f;
+        _vCmd = _vEnd + (_vPeak - _vEnd) * frac;
+        if (_vCmd < _vEnd) _vCmd = _vEnd;
+
+        float e = (_vCmd - _speed) / countsPerMM;        // mm/s
+        float u = kSpeedP * e + _speedI;
+        bool satHi = u >= (float)maxPWM;
+        bool satLo = u <= 0.0f;
+        if (!(satHi && e > 0.0f) && !(satLo && e < 0.0f)) {
+          _speedI += kSpeedI * e * dt;
+        }
+        if (_speed < 0.5f * _vEnd) _speedI += (float)stallEscapePWM;
+        if (_speedI > (float)maxPWM) _speedI = (float)maxPWM;
+        if (_speedI < 0.0f)          _speedI = 0.0f;
+
+        u = kSpeedP * e + _speedI;
+        if (u > (float)maxPWM) u = (float)maxPWM;
+        if (u < 0.0f)          u = 0.0f;
+        _common  = u;
+        _profile = (_vPeak > 0.0f) ? (_vCmd / _vPeak) : 0.0f;
+      }
+
+      // ---- Heading hold (BNO08x) -----------------------------------------
+      if (_mode == Hold) {
         float raw = headingErrorDeg;
 
         // A jump this large between two ticks is not the robot turning: the
@@ -246,59 +328,56 @@ class WheelRegulator {
       }
     }
 
-    // The PWM wheel `index` should run at, given the per-wheel trim this motion
-    // asked for (the relative differences in pwmf[] / pwms[]).
-    int pwmFor(uint8_t index, int wheelTrim) {
-      if (index >= WHEEL_COUNT) return cruisePWM;
-
-      int base = cruisePWM + wheelTrim;
-      if (base > maxPWM) base = maxPWM;
-      if (base < minMovePWM) base = minMovePWM;
-
-      // Ramp runs from rampStartPWM up to this wheel's cruise value.
-      float target = (_mode == Burst)
-                   ? (float)base
-                   : (float)rampStartPWM + ((float)base - (float)rampStartPWM) * _profile;
-
-      // Heading is a rotation added on top of the translation: wheel i goes up
-      // if it is commanded forward and down if commanded backward, so the same
-      // correction turns the robot regardless of which way it is translating.
+    // The four wheel PWMs for this instant, given each wheel's trim (its
+    // offset from the mean of pwmf[]/pwms[]). The heading differential is
+    // applied in full: if the highest wheel would exceed maxPWM, all four are
+    // shifted down by the excess instead of clipping it.
+    void computePWM(const int trim[WHEEL_COUNT], int out[WHEEL_COUNT]) const {
       static const int8_t ROT[WHEEL_COUNT] = {1, -1, -1, 1};
-      float heading = _headingCorr * (float)ROT[index] * (float)_dirSign[index];
-
-      float u = target + _sync[index] + heading;
-
-      int pwm = (int)(u + 0.5f);
-      if (pwm > maxPWM) pwm = maxPWM;
-      if (pwm < minMovePWM) pwm = minMovePWM;
-      return pwm;
+      float u[WHEEL_COUNT];
+      float highest = 0.0f;
+      for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
+        float heading = _headingCorr * (float)ROT[i] * (float)_dirSign[i];
+        u[i] = _common + (float)trim[i] + heading;
+        if (u[i] > highest) highest = u[i];
+      }
+      float shift = highest - (float)maxPWM;
+      if (shift < 0.0f) shift = 0.0f;
+      for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
+        int pwm = (int)(u[i] - shift + 0.5f);
+        if (pwm > maxPWM) pwm = maxPWM;
+        if (pwm < 0)      pwm = 0;
+        out[i] = pwm;
+      }
     }
 
     // ---- Telemetry ---------------------------------------------------------
     Mode  mode()          const { return _mode; }
+    Phase phase()         const { return _phase; }
     long  target()        const { return _target; }
-    float profile()       const { return _profile; }
+    float profile()       const { return _profile; }      // 0..1 speed profile
+    float commonPWM()     const { return _common; }
+    float speedMMs()      const { return _speed / countsPerMM; }
+    float commandMMs()    const { return (_phase == Decel) ? _vCmd / countsPerMM : 0.0f; }
     float headingCorr()   const { return _headingCorr; }
-    float syncCorr(uint8_t i) const { return i < WHEEL_COUNT ? _sync[i] : 0.0f; }
     long  progress(uint8_t i) const { return i < WHEEL_COUNT ? _prog[i] : 0; }
 
-    long spread(const bool driven[WHEEL_COUNT]) const {
-      long lo = -1, hi = 0;
-      for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
-        if (!driven[i]) continue;
-        if (lo < 0 || _prog[i] < lo) lo = _prog[i];
-        if (_prog[i] > hi) hi = _prog[i];
-      }
-      return lo < 0 ? 0 : hi - lo;
-    }
-
   private:
-    Mode _mode = Full;
+    Mode  _mode  = Hold;
+    Phase _phase = Accel;
     long _target = 0;
     long _rampCounts = 0;
+    long _decelCounts = 0;
+    long _creepCounts = 0;          // end speed held over the last part of the move
+    float _endSpeedMMs = 0.0f;      // 0 = endSpeedFraction / minEndSpeedMMs rule
 
     float _profile = 0.0f;          // 0 = just creeping, 1 = full cruise
-    float _sync[WHEEL_COUNT]  = {0, 0, 0, 0};
+    float _common  = 0.0f;          // PWM level shared by all wheels
+    float _speed = 0.0f;            // counts/s, filtered
+    float _lastMeanProg = 0.0f;
+    float _vPeak = 0.0f, _vEnd = 0.0f, _vCmd = 0.0f;   // counts/s
+    float _speedI = 0.0f;
+
     long  _prog[WHEEL_COUNT]  = {0, 0, 0, 0};
     int8_t _dirSign[WHEEL_COUNT] = {1, 1, 1, 1};
 
@@ -315,16 +394,5 @@ class WheelRegulator {
       if (t <= 0.0f) return 0.0f;
       if (t >= 1.0f) return 1.0f;
       return t * t * (3.0f - 2.0f * t);
-    }
-
-    // Speed as a function of position, not time: deceleration always starts a
-    // known distance from the target.
-    float rampProfile(long travelled) const {
-      if (_rampCounts <= 0) return 1.0f;
-      float up = smoothstep((float)travelled / (float)_rampCounts);
-      float remaining = (float)(_target - travelled);
-      if (remaining < 0.0f) remaining = 0.0f;
-      float down = smoothstep(remaining / (float)_rampCounts);
-      return up < down ? up : down;
     }
 };

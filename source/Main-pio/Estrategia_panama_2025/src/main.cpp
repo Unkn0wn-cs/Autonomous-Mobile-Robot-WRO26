@@ -20,6 +20,7 @@
 // module, at BLUETOOTH_BAUD below, and carries only the telemetry line.
 
 #include <Arduino.h>
+#include <stdio.h>
 
 #include "RobotConfig.h"
 #include "Hardware.h"
@@ -29,84 +30,86 @@
 #include "Heading.h"
 
 // One line every TELEMETRY_EVERY_MS, identical on Serial (USB) and Serial2
-// (Bluetooth):
-//   r/s   routine and state
-//   deg   heading since power-on, degrees (0 when the sensor is stale)
-//   err   heading error the regulator sees, degrees (0 when stale)
-//   corr  heading correction being applied, PWM
-//   pwm   PWM on motor1..motor4 (rear right, rear left, front left, front
-//         right); 0 for a released wheel
-//   v     speed of motor1..motor4 in mm/s, signed by encoder direction
-//   age   ms since the last sensor report     rst   sensor resets so far
-//   hz    loop() passes per second
-// The line is shorter than the TX buffer (SERIAL_TX_BUFFER_SIZE, 128 bytes in
-// platformio.ini) and is only written into empty buffers, so print() never
-// waits for the UART and loop() never stalls. Set TELEMETRY to false to
-// silence it.
-static const bool          TELEMETRY          = true;
+// (Bluetooth). Fixed-width columns, so consecutive lines read as a table:
+//
+//   r4 s2   MIDDLE  ball 180,25  hdg   -1.2  err  -0.35  corr   3.2  pwm 232 240 228 235  v  310  305  312  300
+//
+//   r s    routine and state
+//   lane   the lane the robot is committed to. Changes when routine 6 picks
+//          the next one from the camera.
+//   ball   where selectOpeningRoutine() saw the purple ball at boot, Pixy
+//          image pixels x,y; "none" if it never did
+//   hdg    heading since power-on, degrees (0 when the sensor is stale)
+//   err    heading error the regulator sees, degrees (0 when stale)
+//   corr   heading correction being applied, PWM
+//   pwm    PWM on motor1..motor4 (rear right, rear left, front left, front
+//          right); 0 for a released wheel
+//   v      speed of motor1..motor4 in mm/s, signed by encoder direction
+//
+// The line is built in a buffer first and only written when both ports have
+// room for all of it, so write() never waits for the UART and loop() never
+// stalls. The buffer is smaller than the TX buffers (SERIAL_TX_BUFFER_SIZE,
+// 128 bytes in platformio.ini).
+
+static const bool          TELEMETRY          = true; //Set to false to silence telemetry
 static const unsigned long TELEMETRY_EVERY_MS = 250;
 
-// UART rate of the Bluetooth module. 9600 is what an HC-05 / HC-06 talks from
-// the factory, so a new module works with no configuration. At 9600 the
-// longest line takes about 120 ms to leave the buffer, inside the 250 ms
-// period, so the rule above still holds. If the module is set faster with
-// bt_passthrough, change this to match.
+// 9600 is the HC-05 / HC-06 factory rate; at 9600 the longest line leaves in
+// about 115 ms, inside the 250 ms period. Change to match if the module was
+// set faster with bt_passthrough.
 static const unsigned long BLUETOOTH_BAUD = 9600;
 
-static void printTelemetryTo(Print& out, float deg, float err, float corr,
-                             const int v[], unsigned long age,
-                             unsigned long rst, unsigned long hz) {
-  out.print(F("r=")); out.print(routine);
-  out.print(F(" s=")); out.print(state);
-  out.print(F(" deg=")); out.print(deg, 1);
-  out.print(F(" err=")); out.print(err, 2);
-  out.print(F(" corr=")); out.print(corr, 1);
-  out.print(F(" pwm="));
-  for (uint8_t i = 0; i < 4; i++) { if (i) out.print(','); out.print(move.wheelPWM[i]); }
-  out.print(F(" v="));
-  for (uint8_t i = 0; i < 4; i++) { if (i) out.print(','); out.print(v[i]); }
-  out.print(F(" age=")); out.print(age);
-  out.print(F(" rst=")); out.print(rst);
-  out.print(F(" hz=")); out.println(hz);
+static const char* laneName(rlane l) {
+  switch (l) {
+    case OUTER: return "OUTER";
+    case INNER: return "INNER";
+    default:    return "MIDDLE";
+  }
 }
 
 static void printTelemetry() {
   static unsigned long lastPrint = 0;
-  static unsigned long loops = 0;
   static long lastCount[4] = {0, 0, 0, 0};
-  loops++;
 
   unsigned long now = millis();
-  if (now - lastPrint < TELEMETRY_EVERY_MS) return;
-
-  // Not drained yet (another print got in first): try again next pass rather
-  // than let print() block.
-  if (Serial.availableForWrite()  < SERIAL_TX_BUFFER_SIZE - 1 ||
-      Serial2.availableForWrite() < SERIAL_TX_BUFFER_SIZE - 1) return;
-
   unsigned long elapsed = now - lastPrint;
-  unsigned long hz = loops * 1000UL / elapsed;
-  lastPrint = now;
-  loops = 0;
+  if (elapsed < TELEMETRY_EVERY_MS) return;
 
   // Wheel speed from the encoder counts gained since the previous line.
   Encoders* enc[4] = {&encoderRearRight, &encoderRearLeft, &encoderLeft, &encoderRight};
   const float mmPerCount = 3.14159265f * diameter / pulses;
-  int v[4];
+  long count[4];
+  int  v[4];
   for (uint8_t i = 0; i < 4; i++) {
-    long count = enc[i]->getEncoderCount();
-    v[i] = (int)((count - lastCount[i]) * mmPerCount * 1000.0f / elapsed);
-    lastCount[i] = count;
+    count[i] = enc[i]->getEncoderCount();
+    v[i] = (int)((count[i] - lastCount[i]) * mmPerCount * 1000.0f / elapsed);
   }
 
-  float deg  = headingSinceBoot();
-  float err  = headingError();
-  float corr = move.regulator.headingCorr();
-  unsigned long age = headingAgeMs();
-  unsigned long rst = headingResetCount();
+  // Floats are formatted separately: avr-libc's snprintf has no %f.
+  char hdg[8], err[8], corr[8], ball[8];
+  dtostrf(headingSinceBoot(),           6, 1, hdg);
+  dtostrf(headingError(),               6, 2, err);
+  dtostrf(move.regulator.headingCorr(), 5, 1, corr);
+  if (purpleX < 0) strcpy_P(ball, PSTR("none"));
+  else             snprintf_P(ball, sizeof ball, PSTR("%d,%d"), purpleX, purpleY);
 
-  printTelemetryTo(Serial,  deg, err, corr, v, age, rst, hz);
-  printTelemetryTo(Serial2, deg, err, corr, v, age, rst, hz);
+  char line[120];
+  int n = snprintf_P(line, sizeof line,
+    PSTR("r%d s%-3d %-6s  ball %-7s hdg %s  err %s  corr %s  pwm %3d %3d %3d %3d  v %4d %4d %4d %4d\r\n"),
+    routine, state, laneName(lane), ball, hdg, err, corr,
+    move.wheelPWM[0], move.wheelPWM[1], move.wheelPWM[2], move.wheelPWM[3],
+    v[0], v[1], v[2], v[3]);
+  if (n >= (int)sizeof line) n = sizeof line - 1;
+
+  // No room yet (another print got in first): keep the sample and try again
+  // next pass rather than let write() block.
+  if (Serial.availableForWrite() < n || Serial2.availableForWrite() < n) return;
+
+  Serial.write(line, n);
+  Serial2.write(line, n);
+
+  lastPrint = now;
+  for (uint8_t i = 0; i < 4; i++) lastCount[i] = count[i];
 }
 
 void setup() {
@@ -116,12 +119,6 @@ void setup() {
 
   pixy.init();
 
-  // Length of the main straight, in mm, for this robot.
-  if(robotSide == RIGHT){
-    lenght = 640;
-  }else{
-    lenght = 1100;
-  }
 
   initHardware();
 

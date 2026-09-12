@@ -34,5 +34,5 @@ extern bool lastSideSwitchState;         // for edge detection
 int testI2C();
 
 // Called on a back microswitch press: the robot is square against the wall, so
-// this becomes the heading reference routines 7 and 8 turn away from.
+// the heading is zeroed there (headingZero()).
 void onSwitchPress();

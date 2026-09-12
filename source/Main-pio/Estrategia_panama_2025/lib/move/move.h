@@ -11,16 +11,18 @@
 //
 // Every distance-counted primitive below is NON-BLOCKING: call it every pass of
 // loop() and it returns true once, when the move has finished. It drives the
-// motors through WheelRegulator, which ramps the PWM, keeps the four wheels to
-// the same travel and holds the heading from the BNO08x (see WheelRegulator.h).
+// motors through WheelRegulator: the encoders shape the speed over the move,
+// the BNO08x heading PID keeps it straight (see WheelRegulator.h).
 //
 // pwmFwd* / pwmStrafe* (pwmf[] / pwms[] in RobotConfig) are used as per-wheel
-// TRIMS: the regulator drives every wheel from its own cruisePWM plus this
-// wheel's difference from the mean of the four.
+// TRIMS: the regulator drives every wheel from a common PWM plus this wheel's
+// difference from the mean of the four.
 //
 // Distance and completion are measured on the front encoders (motors 3 and 4):
 // a move ends when either front wheel reaches the target count, or after
-// moveTimeoutMs, whichever comes first.
+// moveTimeoutMs, whichever comes first. The regulator has already slowed the
+// robot to a creep over the last part of the move, and the motors are braked
+// the moment the count is reached.
 
 #pragma once
 #include <AFMotor.h>
@@ -35,12 +37,23 @@ class Move {
     // reported as done.
     unsigned long moveTimeoutMs = 4000;
 
+    // Wall approach. Backward moves (backward, backwardp, backwardLeft,
+    // backwardRight) end on the back wall, and the routines command more
+    // distance than there is so that the back microswitch, not the count,
+    // ends the move. The wall therefore comes BEFORE the target, where the
+    // normal profile is still fast. A backward move longer than
+    // longBackwardCounts finishes with backwardEnd instead: a curve of
+    // decelCounts down to endSpeedMMs, held over the last creepCounts, so the
+    // wall is met at that speed. Both are set in initHardware().
+    long longBackwardCounts = 0;
+    WheelRegulator::EndSpec backwardEnd;
+
     // PWM values for forward/backward
     int pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4;
     // PWM values for left/right/diagonals
     int pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4;
 
-    // Ramp, wheel sync and heading hold. Its parameters are set in
+    // Speed profile and heading hold. Its parameters are set in
     // initHardware() (e.g. move.regulator.cruisePWM = 232).
     WheelRegulator regulator;
 
@@ -51,7 +64,7 @@ class Move {
     int wheelPWM[WheelRegulator::WHEEL_COUNT] = {0, 0, 0, 0};
 
     // enc1..enc4 belong to motor1..motor4. Distance and completion come from
-    // the front pair (motors 3 and 4); the rear pair takes part in wheel sync.
+    // the front pair (motors 3 and 4); all four feed the mean speed.
     Move(AF_DCMotor& m1, AF_DCMotor& m2, AF_DCMotor& m3, AF_DCMotor& m4,
          Encoders& enc1, Encoders& enc2, Encoders& enc3, Encoders& enc4,
          int fwdPWM1 = 255, int fwdPWM2 = 255, int fwdPWM3 = 255, int fwdPWM4 = 255,
@@ -97,34 +110,36 @@ class Move {
     }
 
     // Zeroes the start counts of all four wheels and arms the regulator.
-    // `targetPulses` sizes the ramp; `mode` selects burst / ramp-only / full.
+    // `targetPulses` sizes the profile; `mode` selects Burst / Profile / Hold;
+    // `end` shapes the finish (default: the regulator's normal rules).
     void startMove(long targetPulses = 0,
-                   WheelRegulator::Mode mode = WheelRegulator::Full) {
+                   WheelRegulator::Mode mode = WheelRegulator::Hold,
+                   WheelRegulator::EndSpec end = WheelRegulator::EndSpec()) {
       startLeft = encoderLeft.getEncoderCount();
       startRight = encoderRight.getEncoderCount();
       for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
         wheelStart[i] = encoders[i] ? encoders[i]->getEncoderCount() : 0;
       }
-      regulator.begin(targetPulses, mode);
+      regulator.begin(targetPulses, mode, end);
       moving = true;
     }
 
     // ---- Wall-hugging straights ------------------------------------------
     // forwardp/backwardp/forwardq trim one diagonal pair by +-d so the robot
-    // presses against the wall it is running along. They run in Ramp mode:
-    // no wheel sync and no heading hold, because the wall does the aligning.
+    // presses against the wall it is running along. They run in Profile mode:
+    // speed profile only, no heading hold, because the wall does the aligning.
     //
     // forwardp returns 1 when the full distance is reached (and stops), 2 once
     // 14/22 of it is reached (without stopping), 0 otherwise.
     int forwardp(long pulses, bool position) {
       const int d = 9;
       if (position == false){
-        armMotion(MOTION_FORWARDP_NEAR, WheelRegulator::Ramp, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
+        armMotion(MOTION_FORWARDP_NEAR, WheelRegulator::Profile, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
       }else{
-        armMotion(MOTION_FORWARDP_FAR, WheelRegulator::Ramp, pulses, pwmFwd1 - d, pwmFwd2, pwmFwd3, pwmFwd4 - d);
+        armMotion(MOTION_FORWARDP_FAR, WheelRegulator::Profile, pulses, pwmFwd1 - d, pwmFwd2, pwmFwd3, pwmFwd4 - d);
       }
 
-      runSynchronised(FORWARD, FORWARD, FORWARD, FORWARD);
+      runRegulated(FORWARD, FORWARD, FORWARD, FORWARD);
       if (checkDoneWithTimeout(pulses)){
         return 1;
       } else if (checkDoneWithTimeout(((pulses / 22)*14), true)){
@@ -134,9 +149,9 @@ class Move {
 
     // Same 1 / 2 / 0 contract as forwardp, with full regulation.
     int forwardRegulated(long pulses) {
-      armMotion(MOTION_FORWARD_REGULATED, WheelRegulator::Full, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
+      armMotion(MOTION_FORWARD_REGULATED, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
 
-      runSynchronised(FORWARD, FORWARD, FORWARD, FORWARD);
+      runRegulated(FORWARD, FORWARD, FORWARD, FORWARD);
       if (checkDoneWithTimeout(pulses)){
         return 1;
       } else if (checkDoneWithTimeout(((pulses / 22)*14), true)){
@@ -147,103 +162,101 @@ class Move {
     bool backwardp(long pulses, bool position) {
       const int d = 6;
       if (position == false){
-        armMotion(MOTION_BACKWARDP_NEAR, WheelRegulator::Ramp, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
+        armMotion(MOTION_BACKWARDP_NEAR, WheelRegulator::Profile, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
       }else{
-        armMotion(MOTION_BACKWARDP_FAR, WheelRegulator::Ramp, pulses, pwmFwd1 - d, pwmFwd2, pwmFwd3, pwmFwd4 - d);
+        armMotion(MOTION_BACKWARDP_FAR, WheelRegulator::Profile, pulses, pwmFwd1 - d, pwmFwd2, pwmFwd3, pwmFwd4 - d);
       }
 
-      runSynchronised(BACKWARD, BACKWARD, BACKWARD, BACKWARD);
+      runRegulated(BACKWARD, BACKWARD, BACKWARD, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     bool forwardq(long pulses, bool position) {
       const int d = 9;
       if (position == false){
-        armMotion(MOTION_FORWARDQ_NEAR, WheelRegulator::Ramp, pulses, pwmFwd1, pwmFwd2 + d, pwmFwd3 + d, pwmFwd4);
+        armMotion(MOTION_FORWARDQ_NEAR, WheelRegulator::Profile, pulses, pwmFwd1, pwmFwd2 + d, pwmFwd3 + d, pwmFwd4);
       }else{
-        armMotion(MOTION_FORWARDQ_FAR, WheelRegulator::Ramp, pulses, pwmFwd1, pwmFwd2 - d, pwmFwd3 - d, pwmFwd4);
+        armMotion(MOTION_FORWARDQ_FAR, WheelRegulator::Profile, pulses, pwmFwd1, pwmFwd2 - d, pwmFwd3 - d, pwmFwd4);
       }
 
-      runSynchronised(FORWARD, FORWARD, FORWARD, FORWARD);
+      runRegulated(FORWARD, FORWARD, FORWARD, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
-    // ---- Fully regulated translations ------------------------------------
-    // Ramp + wheel sync + heading hold.
+    // ---- Free translations -----------------------------------------------
+    // Speed profile + heading hold.
 
     bool forward(long pulses) {
-      armMotion(MOTION_FORWARD, WheelRegulator::Full, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
-      runSynchronised(FORWARD, FORWARD, FORWARD, FORWARD);
+      armMotion(MOTION_FORWARD, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
+      runRegulated(FORWARD, FORWARD, FORWARD, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     bool backward(long pulses) {
-      armMotion(MOTION_BACKWARD, WheelRegulator::Full, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
-      runSynchronised(BACKWARD, BACKWARD, BACKWARD, BACKWARD);
+      armMotion(MOTION_BACKWARD, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
+      runRegulated(BACKWARD, BACKWARD, BACKWARD, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     bool left(long pulses) {
-      armMotion(MOTION_LEFT, WheelRegulator::Full, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-      runSynchronised(BACKWARD, FORWARD, BACKWARD, FORWARD);
+      armMotion(MOTION_LEFT, WheelRegulator::Hold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      runRegulated(BACKWARD, FORWARD, BACKWARD, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     bool right(long pulses) {
-      armMotion(MOTION_RIGHT, WheelRegulator::Full, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-      runSynchronised(FORWARD, BACKWARD, FORWARD, BACKWARD);
+      armMotion(MOTION_RIGHT, WheelRegulator::Hold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      runRegulated(FORWARD, BACKWARD, FORWARD, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     // ---- Diagonals -------------------------------------------------------
-    // Two wheels drive, two are released. Ramp mode: a released wheel has no
-    // travel to synchronise against.
+    // Two wheels drive, two are released. Profile mode, no heading hold.
 
     bool forwardLeft(long pulses) {
-      armMotion(MOTION_FORWARD_LEFT, WheelRegulator::Ramp, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-      runSynchronised(RELEASE, FORWARD, RELEASE, FORWARD);
+      armMotion(MOTION_FORWARD_LEFT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      runRegulated(RELEASE, FORWARD, RELEASE, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     bool forwardRight(long pulses) {
-      armMotion(MOTION_FORWARD_RIGHT, WheelRegulator::Ramp, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-      runSynchronised(FORWARD, RELEASE, FORWARD, RELEASE);
+      armMotion(MOTION_FORWARD_RIGHT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      runRegulated(FORWARD, RELEASE, FORWARD, RELEASE);
       return checkDoneWithTimeout(pulses);
     }
 
     bool backwardLeft(long pulses) {
-      armMotion(MOTION_BACKWARD_LEFT, WheelRegulator::Ramp, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-      runSynchronised(BACKWARD, RELEASE, BACKWARD, RELEASE);
+      armMotion(MOTION_BACKWARD_LEFT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      runRegulated(BACKWARD, RELEASE, BACKWARD, RELEASE);
       return checkDoneWithTimeout(pulses);
     }
 
     bool backwardRight(long pulses) {
-      armMotion(MOTION_BACKWARD_RIGHT, WheelRegulator::Ramp, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-      runSynchronised(RELEASE, BACKWARD, RELEASE, BACKWARD);
+      armMotion(MOTION_BACKWARD_RIGHT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      runRegulated(RELEASE, BACKWARD, RELEASE, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     // ---- Rotation --------------------------------------------------------
-    // Encoder-counted turn: ramp + wheel sync, heading hold OFF (a turn is
+    // Encoder-counted turn: speed profile only, heading hold OFF (a turn is
     // supposed to change the heading).
     //   side == true   pattern F B B F  (the rotateCCW() pattern)
     //   side == false  pattern B F F B  (the rotateCW()  pattern)
     bool rotate(long pulses, bool side) {
       if (side == true){
-        armMotion(MOTION_ROTATE_FBBF, WheelRegulator::Full, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-        runSynchronised(FORWARD, BACKWARD, BACKWARD, FORWARD);
+        armMotion(MOTION_ROTATE_FBBF, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+        runRegulated(FORWARD, BACKWARD, BACKWARD, FORWARD);
       } else {
-        armMotion(MOTION_ROTATE_BFFB, WheelRegulator::Full, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-        runSynchronised(BACKWARD, FORWARD, FORWARD, BACKWARD);
+        armMotion(MOTION_ROTATE_BFFB, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+        runRegulated(BACKWARD, FORWARD, FORWARD, BACKWARD);
       }
 
       return checkDoneWithTimeout(pulses);
     }
 
-    // Open-loop rotation at fixed PWM, used by routines 7/8 while they turn
-    // on the heading sensor. The caller decides when to stop.
-    // The heading reading INCREASES under rotateCW() and DECREASES under
-    // rotateCCW() - see Heading.h.
+    // Open-loop rotation at fixed PWM. Not distance-counted: the caller decides
+    // when to stop. The heading reading INCREASES under rotateCW() and
+    // DECREASES under rotateCCW() - see Heading.h.
     void rotateCW(int pwm, int pwm2, int pwm3, int pwm4) {
       setMotors(BACKWARD, FORWARD, FORWARD, BACKWARD);
       setSpeeds(pwm, pwm2, pwm3, pwm4);
@@ -256,15 +269,19 @@ class Move {
     }
 
     // ---- Stopping --------------------------------------------------------
+    // On the L293D, both inputs low (RELEASE) with the enable held high is the
+    // datasheet's "fast motor stop": the motor is shorted through the driver
+    // and brakes. The enable is the PWM, so the brake is applied at full duty.
+    // With the enable low the outputs float and the motor coasts.
 
-    // Releases all four motors (coast).
+    // Brakes all four motors and holds them.
     void stop() {
       setMotors(RELEASE, RELEASE, RELEASE, RELEASE);
-      clearWheelPWM();
+      brakeHold();
       moving = false;
     }
 
-    // Releases the motors and returns true once durationMs has passed.
+    // Brakes the motors and returns true once durationMs has passed.
     // One shared timer: only one stopForMillis() can be in progress at a time.
     bool stopForMillis(unsigned long durationMs) {
       static unsigned long startTime = 0;
@@ -272,7 +289,7 @@ class Move {
 
       if (!stopping) {
         setMotors(RELEASE, RELEASE, RELEASE, RELEASE);
-        clearWheelPWM();
+        brakeHold();
         moving = false;
         startTime = millis();
         stopping = true;
@@ -294,9 +311,18 @@ class Move {
       return static_cast<long>(mm * pulsesPerMM + 0.5f); // rounded
     }
 
+    // Front-encoder travel since the current or last move began, in counts:
+    // the larger of the two front wheels, the same measure completion uses.
+    // After a move has ended this is target + overshoot.
+    long frontTravelCounts() {
+      long deltaLeft = abs(encoderLeft.getEncoderCount() - startLeft);
+      long deltaRight = abs(encoderRight.getEncoderCount() - startRight);
+      return deltaLeft > deltaRight ? deltaLeft : deltaRight;
+    }
+
     // ---- Completion ------------------------------------------------------
     // Either front encoder reaching `pulses` ends the move. With far == false
-    // the motors are released; with far == true they keep running (used for
+    // the motors are braked; with far == true they keep running (used for
     // the "14/22 of the way" signal). moveTimeoutMs ends any move regardless.
     bool checkDoneWithTimeout(long pulses, bool far = false) {
       long deltaLeft = abs(encoderLeft.getEncoderCount() - startLeft);
@@ -366,7 +392,13 @@ class Move {
       motor4.setSpeed(p4);
     }
 
-    void clearWheelPWM() {
+    // Full-duty enable with both inputs low: the L293D brake. Nothing is
+    // driving the wheels, so wheelPWM reads 0.
+    void brakeHold() {
+      motor1.setSpeed(255);
+      motor2.setSpeed(255);
+      motor3.setSpeed(255);
+      motor4.setSpeed(255);
       for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) wheelPWM[i] = 0;
     }
 
@@ -394,37 +426,47 @@ class Move {
         activeMotion = motionId;
         activeTarget = targetPulses;
         begin(n1, n2, n3, n4);          // records this motion's per-wheel trims
-        startMove(targetPulses, mode);  // zeroes all four wheels, arms the ramp
+
+        // A long backward move finishes with the wall approach.
+        WheelRegulator::EndSpec end;
+        if (isBackward(motionId) && targetPulses > longBackwardCounts) end = backwardEnd;
+        startMove(targetPulses, mode, end);  // zeroes all four wheels, arms the profile
 
         // Translations capture the heading they start on and hold it. A
-        // rotation is supposed to change the heading, so it holds nothing;
+        // rotation is supposed to change the heading, so it captures nothing;
         // the straight after it captures the new heading.
         bool rotating = (motionId == MOTION_ROTATE_FBBF || motionId == MOTION_ROTATE_BFFB);
         if (!rotating && headingCapture) headingCapture();
-        regulator.headingHoldEnabled = !rotating;
 
         moveStartTime = millis();
       }
     }
 
+    // The motions that drive the robot backwards (rotations are not).
+    static bool isBackward(uint8_t motionId) {
+      return motionId == MOTION_BACKWARD ||
+             motionId == MOTION_BACKWARDP_NEAR || motionId == MOTION_BACKWARDP_FAR ||
+             motionId == MOTION_BACKWARD_LEFT  || motionId == MOTION_BACKWARD_RIGHT;
+    }
+
     // Drives the four motors in the requested directions, then re-asserts the
     // regulated PWM for this instant. Called once per loop() while a move runs.
-    void runSynchronised(uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4) {
+    void runRegulated(uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4) {
       setMotors(d1, d2, d3, d4);
 
       const uint8_t dirs[WheelRegulator::WHEEL_COUNT] = {d1, d2, d3, d4};
-      bool participating[WheelRegulator::WHEEL_COUNT];
+      bool driven[WheelRegulator::WHEEL_COUNT];
       long progress[WheelRegulator::WHEEL_COUNT];
       int8_t dirSign[WheelRegulator::WHEEL_COUNT];
 
       for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
-        // A released wheel is coasting and takes no part in the synchronisation.
-        participating[i] = (dirs[i] != RELEASE) && (encoders[i] != 0);
+        // A released wheel is coasting: it is left out of the mean speed.
+        driven[i] = (dirs[i] != RELEASE) && (encoders[i] != 0);
 
         long delta = encoders[i] ? (encoders[i]->getEncoderCount() - wheelStart[i]) : 0;
         progress[i] = delta < 0 ? -delta : delta;
 
-        // Lets the regulator turn a heading correction into a rotation: a
+        // Lets the regulator turn the heading differential into a rotation: a
         // wheel commanded backwards has its PWM reduced to push the robot the
         // same way round.
         dirSign[i] = (dirs[i] == FORWARD) ? 1 : ((dirs[i] == BACKWARD) ? -1 : 0);
@@ -433,19 +475,15 @@ class Move {
       // Fresh heading error every tick.
       regulator.headingErrorDeg = headingSource ? headingSource() : 0.0f;
 
-      regulator.update(participating, progress, dirSign);
-      applyRegulatedSpeeds();
+      regulator.update(driven, progress, dirSign);
+
+      int pwm[WheelRegulator::WHEEL_COUNT];
+      regulator.computePWM(trim, pwm);
+      setSpeeds(pwm[0], pwm[1], pwm[2], pwm[3]);
 
       // A released wheel still has a PWM in its register but is coasting.
       for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
         if (dirs[i] == RELEASE) wheelPWM[i] = 0;
       }
-    }
-
-    void applyRegulatedSpeeds() {
-      setSpeeds(regulator.pwmFor(0, trim[0]),
-                regulator.pwmFor(1, trim[1]),
-                regulator.pwmFor(2, trim[2]),
-                regulator.pwmFor(3, trim[3]));
     }
 };

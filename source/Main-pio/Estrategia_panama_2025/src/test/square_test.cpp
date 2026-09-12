@@ -22,14 +22,22 @@
 //   heading  degrees off the heading this move started on. THE important number.
 //            It should be pushed back toward zero within a fraction of a second
 //            and stay there.
-//   corr     the differential PWM the heading loop is applying, out of +-20.
+//   corr     the differential PWM the heading PID is applying, out of +-40.
 //            Busy early in a move, quiet once it is tracking.
-//   spread   millimetres between the furthest and least travelled wheel.
-//   ramp     the speed profile, 0 % at the ends of a move and 100 % in the
-//            middle.
+//   phase / profile / pwm / v
+//            accel, cruise or decel; the speed profile (100 % = cruise); the
+//            common PWM the regulator is applying; the measured speed and, in
+//            decel, the commanded speed it is tracking. The PWM should fall
+//            well below 200 during decel and v should follow the command.
+//   overshoot
+//            printed after each move has settled: how far past the target the
+//            front wheels ended up. The number this whole test is about.
+//   encoder errors
+//            skipped transitions per encoder (m1 m2 m3 m4). Climbing counts
+//            mean missed edges - the robot travels further than it counts.
 //   SIGN     printed after every turn. The heading reading must move the way
 //            Heading.h says it does for the wheel pattern used. "OK" means the
-//            heading loop and routines 7/8 will turn the right way; "FLIP"
+//            heading loop corrects toward straight, not away from it; "FLIP"
 //            means change HEADING_SIGN in Heading.cpp. Check this on the first
 //            turn - with the wrong sign the heading loop pushes the robot AWAY
 //            from straight on every side.
@@ -73,21 +81,45 @@ static int side  = 0;       // 0-3, which side of the square
 static int lap   = 0;
 
 static float countsPerMM = 1.0f;
-static const bool ALL_DRIVEN[4] = {true, true, true, true};
 
 // ---------------------------------------------------------------------------
 
 // Sampled mid-move.
 static void trace() {
-  Serial.print(F("      ramp "));
+  static const char* const PHASE[3] = {"accel ", "cruise", "decel "};
+  Serial.print(F("      "));
+  Serial.print(PHASE[move.regulator.phase()]);
+  Serial.print(F(" profile "));
   Serial.print((int)(move.regulator.profile() * 100.0f));
-  Serial.print(F("%   heading "));
+  Serial.print(F("%  pwm "));
+  Serial.print((int)move.regulator.commonPWM());
+  Serial.print(F("  v "));
+  Serial.print((int)move.regulator.speedMMs());
+  if (move.regulator.phase() == WheelRegulator::Decel) {
+    Serial.print(F("/"));
+    Serial.print((int)move.regulator.commandMMs());
+  }
+  Serial.print(F(" mm/s  heading "));
   Serial.print(headingError(), 2);
-  Serial.print(F(" deg   corr "));
+  Serial.print(F(" deg  corr "));
   Serial.print(move.regulator.headingCorr(), 1);
-  Serial.print(F(" PWM   age "));
+  Serial.print(F("  age "));
   Serial.print(headingAgeMs());
   Serial.println(F(" ms"));
+}
+
+// Printed once the robot has settled after a move: how far past the target
+// the front wheels ended up, and whether any encoder skipped transitions
+// (a rising error count means missed edges, i.e. under-counting).
+static void settled(long targetCounts) {
+  long over = move.frontTravelCounts() - targetCounts;
+  Serial.print(F("    overshoot "));
+  Serial.print(over / countsPerMM, 1);
+  Serial.print(F(" mm   encoder errors "));
+  Serial.print(encoderRearRight.getEncoderErrorCount()); Serial.print(' ');
+  Serial.print(encoderRearLeft.getEncoderErrorCount());  Serial.print(' ');
+  Serial.print(encoderLeft.getEncoderErrorCount());      Serial.print(' ');
+  Serial.println(encoderRight.getEncoderErrorCount());
 }
 
 static void announce(const __FlashStringHelper* what, long counts) {
@@ -104,9 +136,7 @@ static void report() {
     Serial.print(F("m")); Serial.print(i + 1); Serial.print(F("="));
     Serial.print(move.regulator.progress(i)); Serial.print(F(" "));
   }
-  Serial.print(F("  spread "));
-  Serial.print(move.regulator.spread(ALL_DRIVEN) / countsPerMM, 1);
-  Serial.print(F(" mm   heading off by "));
+  Serial.print(F("  heading off by "));
   Serial.print(headingError(), 2);
   Serial.println(F(" deg"));
 }
@@ -150,12 +180,13 @@ void setup() {
 
   countsPerMM = (float)pulses / (3.14159265f * diameter);
   Serial.print(F("counts/mm "));   Serial.println(countsPerMM, 3);
-  Serial.print(F("PWM band "));    Serial.print(move.regulator.minMovePWM);
-  Serial.print(F(" - "));          Serial.print(move.regulator.maxPWM);
-  Serial.print(F("   cruise "));   Serial.println(move.regulator.cruisePWM);
+  Serial.print(F("ramp start "));  Serial.print(move.regulator.rampStartPWM);
+  Serial.print(F("   cruise "));   Serial.print(move.regulator.cruisePWM);
+  Serial.print(F("   max "));      Serial.println(move.regulator.maxPWM);
   Serial.print(F("heading gains P ")); Serial.print(move.regulator.kHeadingP, 1);
   Serial.print(F(" I "));              Serial.print(move.regulator.kHeadingI, 1);
-  Serial.print(F(" D "));              Serial.println(move.regulator.kHeadingD, 2);
+  Serial.print(F(" D "));              Serial.print(move.regulator.kHeadingD, 2);
+  Serial.print(F("   max differential +-")); Serial.println(move.regulator.maxHeadingCorrection);
 
   if (robotSide == LEFT) {
     Serial.println(F("press the start switch (pin 14) to begin..."));
@@ -186,6 +217,7 @@ void loop() {
       break;
     case 1:
       if (move.stopForMillis(mili)) {
+        settled(mm(SIDE_MM));
         announce(F("TURN 90"), mm(QUARTER_TURN_MM));
         headingZero();              // measure the turn from here
         state++;
@@ -196,6 +228,7 @@ void loop() {
       break;
     case 3:
       if (move.stopForMillis(mili)) {
+        settled(mm(QUARTER_TURN_MM));
         state = 0;
         side++;
 

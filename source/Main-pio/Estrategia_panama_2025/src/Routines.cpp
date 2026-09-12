@@ -7,21 +7,20 @@
 #include "Hardware.h"
 #include "Sensors.h"
 #include "Motion.h"
-#include "Heading.h"
 
 int routine = 4;
 int state = 0;
 bool first = true;
 rlane lane = MIDDLE;
 
-int beta = 8; //degree error
-int alpha = 0;
-
 int connections;
 
 int startTime;
 
 int pesos[NUM_FRANJAS] = {0};
+
+int purpleX = -1;
+int purpleY = -1;
 
 bool lastRoutine = false;
 bool midRoutine = false;
@@ -65,58 +64,308 @@ int classifyLane(float x, float y, bool right) {
 }
 
 // ---------------------------------------------------------------------------
+// Purple ball detection
+//
+// The detector works on the BALL'S EDGES instead of just its centroid, and
+// confirms the answer over several frames:
+//
+//   1. Quality gate - a blob must be purple, tracked for a couple of frames,
+//      big enough and roughly round. This is the "not a grain of dust" filter.
+//   2. Zone scoring - the blob's bounding box is scored against every
+//      calibrated rectangle in ballZones (RobotConfig.cpp), with
+//      BALL_ZONE_TOLERANCE px of graded slack around each one. A blob matching
+//      no zone is DISCARDED rather than being forced into a quadrant, which is
+//      what stops the robot from "detecting the ball where it isn't".
+//   3. Voting - only the largest valid blob of each frame votes, so the ball
+//      and a speck can never both score in the same frame.
+//   4. Early commit - the scan stops the moment one zone is clearly ahead, so
+//      a clean ball is decided in roughly 5 camera frames (~85 ms).
+//
+// Sensitivity. Tuned to be as permissive as possible WITHOUT letting specks of
+// dust vote: the quality gates below only reject things that cannot physically
+// be the ball (too small, too thin, only seen for a single frame), while the
+// multi-frame vote is what actually guarantees the decision is correct.
+// ---------------------------------------------------------------------------
 
-void selectOpeningRoutine() {
-int center_y = 32;
-int center_x = 200;
+static const uint8_t BALL_MIN_AGE     = 2;    // camera frames the blob must have been tracked for.
+                                              //   2 only rejects one-frame flicker; the vote
+                                              //   below does the real confirming.
+static const int  BALL_MIN_SIDE       = 5;    // px. Blob must be at least this wide AND this tall.
+static const long BALL_MIN_AREA       = 45;   // px^2. Anti-dust floor - a real ball is far bigger.
+static const int  BALL_MAX_ASPECT_X10 = 30;   // 3.0 : rejects long thin smears / glare streaks.
+                                              //   Deliberately lenient so a ball clipped by the
+                                              //   frame edge still passes.
+static const int  BALL_ZONE_TOLERANCE = 20;   // px of slack around every measured rectangle, on
+                                              //   all four sides. A ball whose centre lands
+                                              //   outside a zone still matches it, so the numbers
+                                              //   typed in do not have to be perfect.
+                                              //   It is NOT a plain box inflation: matches inside
+                                              //   the band are graded by distance, so when two
+                                              //   zones are both within reach the closer one wins
+                                              //   outright instead of the two fighting. That is
+                                              //   what keeps touching zones unambiguous no matter
+                                              //   how wide this gets. See scoreBallZone().
+                                              //   Widening this only costs false-POSITIVE margin
+                                              //   (a stray purple object further from a real
+                                              //   position can now reach a zone), never
+                                              //   zone-vs-zone accuracy. BALL_CONFIRM_SOFT below
+                                              //   is what pays that back.
+static const long BALL_MIN_SCORE      = 20;   // see scoreBallZone(): >=200 means "centre inside
+                                              //   a zone", 100..199 "centre within tolerance of
+                                              //   one", 20..99 "clearly overlapping one".
+static const int  BALL_CONFIRM_FRAMES = 3;    // frames one zone must win before we commit, when
+                                              //   that zone has had at least one solid hit
+                                              //   (centre truly inside the measured rectangle,
+                                              //   score >= 200).
+static const int  BALL_CONFIRM_SOFT   = 5;    // ...but this many when ALL the evidence came from
+                                              //   the tolerance band. Evidence that leans on the
+                                              //   slack is held to a higher bar, which is what
+                                              //   lets the tolerance above be generous without
+                                              //   getting loose.
+static const int  BALL_VOTE_MARGIN    = 2;    // frames the leader must lead the rest by, either way.
+static const unsigned long BALL_SCAN_MS   = 900;  // hard ceiling on the whole scan.
+static const unsigned long BALL_GIVEUP_MS = 350;  // if NOTHING ball-like has been seen by now,
+                                                  //   stop early so an empty field costs almost
+                                                  //   nothing.
 
-
-int noballs = 0;
-
-for (int i = 0; i < 120; i++){
-pixy.ccc.getBlocks();
-if (pixy.ccc.numBlocks > 0) {
-  for (int j = 0; j < pixy.ccc.numBlocks; j++) {
-    if (pixy.ccc.blocks[j].m_signature == purpleSignature &&
-        pixy.ccc.blocks[j].m_age > 10
-        && pixy.ccc.blocks[j].m_x > 105 && pixy.ccc.blocks[j].m_x < 300 &&
-        pixy.ccc.blocks[j].m_y > 20 && pixy.ccc.blocks[j].m_y < 90
-        ) {
-
-      int ix = pixy.ccc.blocks[j].m_x;
-      int iy = pixy.ccc.blocks[j].m_y;
-      // pick the opening routine from the quadrant
-      if (ix < center_x && iy < center_y){
-        routine = 0;
-        pixy.ccc.blocks[j].print();
-        Serial.print("upper left corner, case 1");
-        return;
-      } else if (ix > center_x && iy < center_y){
-        routine = 1;
-        pixy.ccc.blocks[j].print();
-        Serial.print("upper right corner, case 3");
-        return;
-      } else if (ix < center_x && iy > center_y){
-        routine = 2;
-        pixy.ccc.blocks[j].print();
-        Serial.print("lower left corner, case 0");
-        return;
-      } else if (ix > center_x && iy > center_y){
-        routine = 3;
-        pixy.ccc.blocks[j].print();
-        Serial.print("lower Right corner, case 2");
-        return;
-      }
-    }
-  }
-  } else if (noballs < 10){
-    noballs++;
-  } else {return;}
-  delay(14);
+// Area of the overlap between two axis-aligned rectangles; 0 when they do not
+// touch. Returns long because a full-frame box (316 x 208) overflows a 16-bit
+// AVR int.
+static long rectOverlap(int aL, int aT, int aR, int aB, int bL, int bT, int bR, int bB) {
+  int w = min(aR, bR) - max(aL, bL);
+  int h = min(aB, bB) - max(aT, bT);
+  if (w <= 0 || h <= 0) return 0;
+  return (long)w * (long)h;
 }
 
+// Scores one blob box against one zone. Higher is better, 0 means no relation.
+// The result falls into three tiers that never cross, so the ranking between
+// zones is always well defined:
+//
+//   200..300 : the blob's centre is INSIDE the measured rectangle. Strongest
+//              evidence. The 0..100 on top is the box overlap, which is what
+//              separates two zones that both contain the centre (touching
+//              zones) - the rectangle holding more of the ball wins, which is
+//              the physically correct answer.
+//   100..199 : the centre is OUTSIDE the rectangle but within
+//              BALL_ZONE_TOLERANCE of it. Graded by how far outside it is, so
+//              when two zones are both in reach the CLOSER one always wins
+//              outright - never a coin flip between neighbours.
+//     0..100 : the centre is well outside, but the boxes still overlap.
+//              Normalised by the SMALLER of the two boxes so a wide zone and a
+//              tight, ball-sized zone are judged on the same scale.
+static long scoreBallZone(int bL, int bT, int bR, int bB, long blobArea, const int zone[4]) {
+  int zL = min(zone[0], zone[2]);
+  int zR = max(zone[0], zone[2]);
+  int zT = min(zone[1], zone[3]);
+  int zB = max(zone[1], zone[3]);
 
-pixy.setLamp(0, 0);
+  // An un-filled { 0, 0, 0, 0 } row has no area and must never match anything.
+  // This check has to happen BEFORE the tolerance is applied, otherwise the
+  // slack would turn an empty row into a live region around the top-left
+  // corner of the image.
+  if (zR - zL <= 0 || zB - zT <= 0) return 0;
+
+  int cx = (bL + bR) / 2;
+  int cy = (bT + bB) / 2;
+
+  // How far the centre sits outside the rectangle on each axis; 0 when inside.
+  int dx = 0, dy = 0;
+  if (cx < zL)      dx = zL - cx;
+  else if (cx > zR) dx = cx - zR;
+  if (cy < zT)      dy = zT - cy;
+  else if (cy > zB) dy = cy - zB;
+
+  long zoneArea = (long)(zR - zL) * (long)(zB - zT);
+  long refArea  = (blobArea < zoneArea) ? blobArea : zoneArea;
+  long overlap  = rectOverlap(bL, bT, bR, bB, zL, zT, zR, zB);
+  long overlapScore = (refArea > 0) ? (overlap * 100L) / refArea : 0;
+
+  if (dx == 0 && dy == 0) {
+    return 200 + overlapScore;                    // centre inside the measured rectangle
+  }
+
+  if (dx <= BALL_ZONE_TOLERANCE && dy <= BALL_ZONE_TOLERANCE) {
+    // Inside the tolerance band. miss runs 1..2*tolerance, so the penalty runs
+    // 0..100 and the tier stays between 100 and 199 - always above a
+    // pure-overlap match, always below a centre that is genuinely inside some
+    // other zone.
+    long miss    = (long)dx + (long)dy;
+    long penalty = (miss * 100L) / (2L * (long)BALL_ZONE_TOLERANCE);
+    return 200 - penalty - 1;
+  }
+
+  return overlapScore;                            // far outside, judged on overlap alone
+}
+
+// Strings kept in flash (F()) so the detector adds no SRAM on the Mega.
+static const __FlashStringHelper *ballZoneName(int zone) {
+  switch (zone) {
+    case 0: return F("upper left  -> routine 0");
+    case 1: return F("upper right -> routine 1");
+    case 2: return F("lower left  -> routine 2");
+    case 3: return F("lower right -> routine 3");
+  }
+  return F("no ball -> routine 4");
+}
+
+// Returns the ball position index 0..3, or -1 when no ball could be confirmed.
+// On success purpleX/purpleY hold the centre of the last blob that voted for
+// the winning zone, for the telemetry line.
+static int detectBallZone() {
+  int  votes[NUM_BALL_ZONES]  = {0};
+  long weight[NUM_BALL_ZONES] = {0};
+  bool solid[NUM_BALL_ZONES]  = {false};   // zone has had >=1 centre-inside hit, not just slack
+  int  lastCx[NUM_BALL_ZONES] = {0};       // centre of the last blob that voted for each zone
+  int  lastCy[NUM_BALL_ZONES] = {0};
+  bool seenAnything = false;
+
+  unsigned long scanStart = millis();
+  int committed = -1;
+
+  while (millis() - scanStart < BALL_SCAN_MS) {
+
+    // Non-blocking read. A negative result is BUSY (no new frame yet) or a
+    // link error; either way it is NOT evidence of an empty field, so it must
+    // not count as a sample.
+    if (pixy.ccc.getBlocks(false) < 0) {
+      delayMicroseconds(500);
+      continue;
+    }
+
+    int  frameZone  = -1;
+    long frameArea  = 0;
+    long frameScore = 0;
+    int  frameL = 0, frameT = 0, frameR = 0, frameB = 0;
+
+    for (int i = 0; i < pixy.ccc.numBlocks; i++) {
+      Block &b = pixy.ccc.blocks[i];
+
+      if ((int)b.m_signature != purpleSignature) continue;
+      if (b.m_age < BALL_MIN_AGE) continue;
+
+      int bw = (int)b.m_width;
+      int bh = (int)b.m_height;
+      if (bw < BALL_MIN_SIDE || bh < BALL_MIN_SIDE) continue;
+
+      long area = (long)bw * (long)bh;
+      if (area < BALL_MIN_AREA) continue;
+
+      // A ball is about as wide as it is tall; reject streaks and reflections.
+      if ((long)bw * 10L > (long)bh * (long)BALL_MAX_ASPECT_X10) continue;
+      if ((long)bh * 10L > (long)bw * (long)BALL_MAX_ASPECT_X10) continue;
+
+      // Both edges of the blob. m_x / m_y are uint16_t, so cast BEFORE
+      // subtracting or a blob near the left/top border wraps around to ~65000.
+      int cx = (int)b.m_x;
+      int cy = (int)b.m_y;
+      int bL = cx - bw / 2;
+      int bR = cx + bw / 2;
+      int bT = cy - bh / 2;
+      int bB = cy + bh / 2;
+
+      int  bestZone  = -1;
+      long bestScore = 0;
+      for (int z = 0; z < NUM_BALL_ZONES; z++) {
+        long score = scoreBallZone(bL, bT, bR, bB, area, ballZones[z]);
+        if (score > bestScore) { bestScore = score; bestZone = z; }
+      }
+
+      // Purple, ball-shaped, but not at any calibrated ball position -> noise.
+      if (bestZone < 0 || bestScore < BALL_MIN_SCORE) continue;
+
+      // Only the biggest valid blob of this frame is allowed to vote.
+      if (area > frameArea) {
+        frameArea  = area;
+        frameZone  = bestZone;
+        frameScore = bestScore;
+        frameL = bL; frameT = bT; frameR = bR; frameB = bB;
+      }
+    }
+
+    if (frameZone < 0) {
+      // Nothing ball-like in this frame. Bail out early only while we have
+      // never seen a ball at all - once there is evidence, keep sampling for
+      // the full budget.
+      if (!seenAnything && millis() - scanStart > BALL_GIVEUP_MS) break;
+      continue;
+    }
+
+    seenAnything = true;
+    votes[frameZone]++;
+    weight[frameZone] += frameArea;
+    lastCx[frameZone] = (frameL + frameR) / 2;
+    lastCy[frameZone] = (frameT + frameB) / 2;
+    if (frameScore >= 200) solid[frameZone] = true;   // centre truly inside the rectangle
+
+    Serial.print(F("blob edges L"));
+    Serial.print(frameL); Serial.print(F(" T")); Serial.print(frameT);
+    Serial.print(F(" R")); Serial.print(frameR); Serial.print(F(" B")); Serial.print(frameB);
+    Serial.print(frameScore >= 200 ? F("  solid  -> ") : F("  in-tol -> "));
+    Serial.println(ballZoneName(frameZone));
+
+    // Leader and runner-up over everything collected so far. Ties break on
+    // accumulated blob area, so the closer/bigger sighting wins.
+    int leader = 0, runnerUp = -1;
+    for (int z = 1; z < NUM_BALL_ZONES; z++) {
+      if (votes[z] > votes[leader] ||
+         (votes[z] == votes[leader] && weight[z] > weight[leader])) leader = z;
+    }
+    for (int z = 0; z < NUM_BALL_ZONES; z++) {
+      if (z == leader) continue;
+      if (runnerUp < 0 || votes[z] > votes[runnerUp]) runnerUp = z;
+    }
+
+    // A zone that has been hit dead-on at least once commits quickly. One that
+    // has only ever matched through the tolerance slack has to prove itself
+    // over more frames - that is the price of the generous BALL_ZONE_TOLERANCE,
+    // and it is only paid in the rare case where the calibration is off enough
+    // that the ball never lands inside the box.
+    int needed = solid[leader] ? BALL_CONFIRM_FRAMES : BALL_CONFIRM_SOFT;
+
+    if (votes[leader] >= needed &&
+        votes[leader] - votes[runnerUp] >= BALL_VOTE_MARGIN) {
+      committed = leader;
+      break;
+    }
+  }
+
+  // Budget ran out without a clear winner: use the best evidence we have
+  // rather than throwing away a ball we definitely saw.
+  if (committed < 0) {
+    for (int z = 0; z < NUM_BALL_ZONES; z++) {
+      if (votes[z] == 0) continue;
+      if (committed < 0 || votes[z] > votes[committed] ||
+         (votes[z] == votes[committed] && weight[z] > weight[committed])) committed = z;
+    }
+  }
+
+  if (committed >= 0) {
+    purpleX = lastCx[committed];
+    purpleY = lastCy[committed];
+  }
+
+  Serial.print(F("ball scan "));
+  Serial.print(millis() - scanStart);
+  Serial.print(F(" ms  votes "));
+  for (int z = 0; z < NUM_BALL_ZONES; z++) {
+    Serial.print(votes[z]);
+    Serial.print(' ');
+  }
+  Serial.print(F(" => "));
+  Serial.println(ballZoneName(committed));
+
+  return committed;
+}
+
+void selectOpeningRoutine() {
+  int ballZone = detectBallZone();
+  if (ballZone >= 0) {
+    routine = ballZone;   // routines 0..3 are the four ball-capture sequences
+  }
+  // routine stays 4 (the plain lane loop) when nothing was confirmed.
+
+  pixy.setLamp(0, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +404,7 @@ void handleMicroSwitches() {
 
 // ---------------------------------------------------------------------------
 
-void updateEndgameTiming() {
+void updateEndgameTiming() { //DO NOT DELETE THIS FUNCTION, IT IS USED TO TIME THE ENDGAME
     // Last Routine Code ----------------------------------------------
   // if (lastRoutine == false &&  (millis() > 105000 + startTime) ){ //&& (routine != 7 && routine != 5)
   //   lastRoutine = true;
@@ -491,9 +740,9 @@ switch (routine) {//------------------------------------------------------------
     switch(state){
       case -1:
         if (robotSide == RIGHT){
-          if(move.backwardp(mm(lenght + 50), true)) state = 1;
+          if(move.backwardp(mm(lenght), true)) state = 1;
         }else{
-          if(move.backwardp(mm(lenght + 100), false)) state = 1;
+          if(move.backwardp(mm(lenght), false)) state = 1;
         }
         break;
       case 0:
@@ -532,9 +781,7 @@ switch (routine) {//------------------------------------------------------------
             Block block = pixy.ccc.blocks[i];
 
             // Classify into a franja by image position.
-            // KNOWN: `true` is hard coded, so the LEFT robot classifies using
-            // the RIGHT robot's boundary lines. The robot is tuned around it.
-            int franja = classifyLane(block.m_x, block.m_y, true);
+            int franja = classifyLane(block.m_x, block.m_y, (robotSide == RIGHT));
             franja = constrain(franja, 0, NUM_FRANJAS - 1);
 
             // Blob area is its weight.
@@ -639,27 +886,11 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 4:
         digitalWrite(LED, HIGH);
-
-        if (headingAvailable()){
-          if (robotSide == LEFT){
-            alpha = -80;
-          } else {alpha  = 80;}
-
-          if (headingSinceZero() >= alpha + beta) {
-              move.rotateCCW(200, 200, 200, 200);
-          } else if (headingSinceZero() <= alpha - beta){
-              move.rotateCW(200, 200, 200, 200);
-          } else {
-            state++;
-          }
-        } else{
-          if(robotSide == RIGHT){
-            if(move.rotate(mm(146), false)) state++;
-          } else {
-            if(move.rotate(mm(146), true)) state++;
-          }
+        if(robotSide == RIGHT){
+          if(move.rotate(mm(146), false)) state++;
+        } else {
+          if(move.rotate(mm(146), true)) state++;
         }
-
         break;
       case 5:
         if(move.stopForMillis(mili)) state++;
@@ -692,24 +923,10 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 12:
         digitalWrite(LED, HIGH);
-
-        if (headingAvailable()){
-          if (robotSide == LEFT){
-            alpha = -80;
-          } else {alpha  = 80;}
-          if (headingSinceZero() >= alpha + beta) {
-              move.rotateCCW(200, 200, 200, 200);
-          } else if (headingSinceZero() <= alpha - beta){
-              move.rotateCW(200, 200, 200, 200);
-          } else {
-            state++;
-          }
-        } else{
-          if(robotSide != RIGHT){
-            if(move.rotate(mm(166), false)) state++;
-          } else {
-            if(move.rotate(mm(166), true)) state++;
-          }
+        if(robotSide != RIGHT){
+          if(move.rotate(mm(166), false)) state++;
+        } else {
+          if(move.rotate(mm(166), true)) state++;
         }
         break;
       case 13:
@@ -751,18 +968,6 @@ switch (routine) {//------------------------------------------------------------
 
     }
   break;
-  case 8:
-    alpha = 0;
-    if (headingSinceZero() >= alpha + beta) {
-        move.rotateCCW(200, 200, 200, 200);
-    } else if (headingSinceZero() <= alpha - beta) {
-        move.rotateCW(200, 200, 200, 200);
-    } else {
-        routine = 7;
-        state = 0;
-    }
-    // KNOWN: no `break` here - control falls through into case 9 on every pass.
-
   case 9:
     if (lastRoutine == false and millis() > 61000){
       routine = 6;
