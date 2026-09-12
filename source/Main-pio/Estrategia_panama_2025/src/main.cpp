@@ -7,7 +7,9 @@
 //   Hardware.h/.cpp         WHICH ROBOT this build is for  <- switch robots here
 //                           and its pins, motors, servo, rotor, Move instance
 //   Sensors.h/.cpp          encoders, BNO08x heading, camera, microswitches
-//   generalStrategy.h/.cpp  the strategy state machine
+//   Strategy.h              what a strategy defines, which one is built, its
+//                           options; generalStrategy.cpp / controlStrategy.cpp
+//                           are the strategies, one per PlatformIO environment
 //   lib/move/               Move + WheelRegulator, the drive layer (moves in
 //                           millimetres, converted to encoder counts inside)
 //
@@ -15,14 +17,14 @@
 // they appear.
 //
 // SERIAL: Serial is the USB cable, 115200 baud (platformio.ini monitor_speed
-// for megaatmega2560). Serial2 (TX2 pin 16, RX2 pin 17) is the Bluetooth
+// for the competition environments). Serial2 (TX2 pin 16, RX2 pin 17) is the Bluetooth
 // module; both carry the telemetry (Sensors.h), Serial also the boot messages.
 
 #include <Arduino.h>
 
 #include "Hardware.h"
 #include "Sensors.h"
-#include "generalStrategy.h"
+#include "Strategy.h"
 
 void setup() {
 
@@ -39,15 +41,8 @@ void setup() {
   if (headingBegin()) Serial.println("BNO08x heading sensor ready");
   else                Serial.println("BNO08x NOT found - driving without heading hold");
 
-  // The wall robot waits on its start switch; the ramp robot starts immediately.
-  if (robotSide == LEFT){
-    bool pinpressed = false;
-    while(!pinpressed){
-      if ((digitalRead(switchPin)) == HIGH){
-        pinpressed = true;
-      }
-    }
-  }
+  Serial.print("strategy: ");
+  Serial.println(strategyName);
 
   startTime = millis();
 
@@ -61,8 +56,8 @@ void setup() {
   selectOpeningRoutine();
 
   // Opens the Bluetooth port and queues the status block; loop() sends it.
-  telemetryBegin(robotSide == LEFT ? "LEFT (wall)" : "RIGHT (ramp)", lenght,
-                 3.14159265f * diameter / pulses, routine);
+  telemetryBegin(robotSide == LEFT ? "LEFT (wall)" : "RIGHT (ramp)", strategyName,
+                 lenght, 3.14159265f * diameter / pulses, routine);
 }
 
 void loop() {
@@ -70,7 +65,7 @@ void loop() {
   // Inputs first: a switch press can advance the state machine before it runs.
   handleMicroSwitches();
 
-  // Disabled endgame timing. See the note on lastRoutine in generalStrategy.h.
+  // Match clock for the endgame kicks (an option in Strategy.h).
   updateEndgameTiming();
 
   // Fresh BNO08x reading. Rate-limits itself internally.
@@ -79,7 +74,6 @@ void loop() {
   // At most one line per pass, and only when it fits the serial buffers.
   telemetryUpdate(routine, state, move.wheelPWM, move.regulator.headingCorr());
 
-  // MUST BE LAST: routine 4 state 5 contains a bare `return` that is expected
-  // to skip everything after it.
+  // MUST BE LAST
   runRoutines();
 }

@@ -1,10 +1,28 @@
-// generalStrategy.h - the strategy state machine: the routines, the purple
-// ball opening, the camera lane choice and the microswitch handling.
+// Strategy.h - what a strategy is, which one is built, and its options.
+//
+// A STRATEGY is one .cpp file that defines everything declared below: the two
+// state globals, `startTime`, `strategyName`, and the four functions main.cpp
+// calls. Exactly one strategy is compiled into a firmware, chosen by the
+// PlatformIO environment (platformio.ini):
+//
+//   general   src/generalStrategy.cpp   the lane loop with the camera opening
+//   control   src/controlStrategy.cpp   the wall robot's control routines
+//
+// TO SWITCH STRATEGIES: upload the other environment (PlatformIO sidebar ->
+// Project Tasks -> <env> -> Upload, or `pio run -e control -t upload`). The
+// toolbar buttons use `default_envs`. The strategy prints its name on the USB
+// boot line and in the first line of the Bluetooth status block - read it
+// before every match.
+//
+// TO ADD A STRATEGY: copy controlStrategy.cpp, give it its own `strategyName`,
+// and add an environment whose build_src_filter excludes the other strategy
+// files.
 //
 // TWO LEVELS OF STATE:
-//   `routine` picks which strategy is running
-//   `state`   steps through that strategy
-// Both are plain globals and transitions are plain assignments.
+//   `routine` picks which routine is running
+//   `state`   steps through that routine
+// Both are plain globals and transitions are plain assignments. In the general
+// strategy:
 //
 //   routine 0-3   opening purple ball handling, one per calibrated ball zone
 //   routine 4     main lane loop
@@ -21,6 +39,29 @@
 #pragma once
 
 #include <Arduino.h>
+
+// Name printed at boot and in the telemetry status block; a string literal
+// baked into the firmware by the strategy that was compiled.
+extern const char* strategyName;
+
+// ---------------------------------------------------------------------------
+// General strategy options
+// ---------------------------------------------------------------------------
+
+// Mid and late game kicks. With the option on, updateEndgameTiming() runs the
+// clock below against `startTime`:
+//   MID_KICK   lane forced (OUTER, or MIDDLE if already in routine 4 on OUTER)
+//              and the straight shortened by 30 mm; the next time routine 4
+//              finishes a straight it goes to routine 9 (LEFT: camera ball
+//              tracking; RIGHT: routine 10)
+//   MID_DONE   until MID_END: straight restored, normal laps resume
+//   LATE_KICK  lane OUTER, straight -30 mm, routine 9 for the rest of the match
+// With the option off nothing is ever set and routines 9 and 10 are unreachable.
+static const bool          GENERAL_ENDGAME_KICKS = false;
+static const unsigned long GENERAL_MID_KICK_MS   = 45000;
+static const unsigned long GENERAL_MID_DONE_MS   = 61000;
+static const unsigned long GENERAL_MID_END_MS    = 100000;
+static const unsigned long GENERAL_LATE_KICK_MS  = 105000;
 
 // Which lane of the field the robot is currently running. OUTER is furthest
 // from the centre wall, INNER closest; move.inner()/move.outer() translate
@@ -47,12 +88,9 @@ extern rlane lane;   // which lane the robot is currently committed to
 // every pass through routine 7.
 extern int connections;
 
-// Millis at the end of setup().
-//
-// KNOWN: an `int`, 16 bits on AVR, so it truncates millis() and wraps every
-// 32.767 seconds. Only read by the disabled endgame timing block. It must
-// become unsigned long before that block is re-enabled.
-extern int startTime;
+// Millis when the match clock started (set in setup(), before the camera
+// scan). The endgame kicks are timed from it.
+extern unsigned long startTime;
 
 // ---------------------------------------------------------------------------
 // Camera lane weighting
@@ -62,17 +100,10 @@ const int NUM_FRANJAS = 3;
 extern int pesos[NUM_FRANJAS];  // accumulated orange blob area per franja
 
 // ---------------------------------------------------------------------------
-// Endgame timing flags.
-//
-// DISABLED. Every line that sets these to true is commented out in
-// updateEndgameTiming(), so all three are permanently false. Consequences:
-//
-//   * routine 9 is UNREACHABLE - its only entry point is routine 4 state 5,
-//     gated on `lastRoutine || midRoutine`
-//   * routine 10 is UNREACHABLE - it is only entered from routine 9
-//
-// Both routines and the timing block are kept so the endgame behaviour can be
-// re-enabled by uncommenting it.
+// Endgame timing flags, set by updateEndgameTiming() when GENERAL_ENDGAME_KICKS
+// is on. Routine 4 state 5 goes to routine 9 on `lastRoutine || midRoutine`;
+// routine 6 state 7 forces the OUTER sequence on them. With the option off
+// all three stay false and routines 9 and 10 are unreachable.
 // ---------------------------------------------------------------------------
 
 extern bool lastRoutine;
@@ -99,7 +130,8 @@ void selectOpeningRoutine();
 // also zeroes the heading.
 void handleMicroSwitches();
 
-// The disabled endgame timing block. See the note on lastRoutine above.
+// The match clock for the endgame kicks (GENERAL_ENDGAME_KICKS above). Call
+// once per loop().
 void updateEndgameTiming();
 
 // Runs one pass of the routine state machine.

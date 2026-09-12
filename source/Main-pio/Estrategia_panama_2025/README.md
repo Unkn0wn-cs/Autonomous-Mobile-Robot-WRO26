@@ -216,13 +216,21 @@ Direction is fixed once at boot and never changes — only speed varies. The rot
 is off during rotations, full speed on the straights, and slowed near the end of
 a sweep.
 
-### Endgame timing (disabled)
+### Mid and late game kicks (an option, off by default)
 
-`updateEndgameTiming()` and its flags (`lastRoutine`, `midRoutine`,
-`midRoutineDone`) are commented out, so routines 9 and 10 are unreachable. The
-block and both routines are kept so the behaviour can be re-enabled by
-uncommenting it; `startTime` must become `unsigned long` first (it is a 16-bit
-`int` today).
+`GENERAL_ENDGAME_KICKS` in [`src/Strategy.h`](src/Strategy.h) switches the
+match clock in `updateEndgameTiming()` on. Times count from `startTime`, set
+at the end of `setup()` before the camera scan:
+
+| Constant | Default | What happens |
+|---|---|---|
+| `GENERAL_MID_KICK_MS` | 45 s | lane forced (OUTER, or MIDDLE if already in routine 4 on OUTER), straight −30 mm; the next time routine 4 finishes a straight it goes to **routine 9** (LEFT: camera ball tracking; RIGHT: routine 10 — back 50, left 500) |
+| `GENERAL_MID_DONE_MS` … `GENERAL_MID_END_MS` | 61 s … 100 s | straight restored, normal laps resume |
+| `GENERAL_LATE_KICK_MS` | 105 s | lane OUTER, straight −30 mm, routine 9 for the rest of the match |
+
+With the option off nothing ever sets the flags (`lastRoutine`, `midRoutine`,
+`midRoutineDone`) and routines 9 and 10 are unreachable. The boot line and the
+Bluetooth status block show `general, kicks on` / `general, kicks off`.
 
 ---
 
@@ -233,12 +241,14 @@ uncommenting it; `startTime` must become `unsigned long` first (it is a 16-bit
 | `src/main.cpp` | `setup()` / `loop()` |
 | `src/Hardware.*` | everything physical that *moves*: **the robot selector** + per-robot tuning, wheel geometry, motors, `Move`, servo, rotor and their pins, `initHardware()` |
 | `src/Sensors.*` | everything that *senses* and its pins: the four encoders, BNO08x heading (polling, references, sign, fail-safes), Pixy2, microswitches, `initSensors()`, I2C bus scan — and the telemetry (status block + table on USB and Bluetooth) |
-| `src/generalStrategy.*` | the routine/state machine, purple ball detector, camera lane choice, microswitch handling, `mili` |
+| `src/Strategy.h` | what a strategy must define (the state globals and the four functions `main.cpp` calls), which strategies exist, the general strategy's options, `mili` |
+| `src/generalStrategy.cpp` | **the general strategy**: the routine/state machine, purple ball detector, camera lane choice, microswitch handling, endgame clock |
+| `src/controlStrategy.cpp` | **the control strategy** (wall robot): the same interface, its own routines |
 | `lib/move/move.h` | motion primitives (non-blocking, in millimetres), `inner()`, `outer()` |
 | `lib/move/WheelRegulator.h` | speed profile (encoders) + heading PID (BNO08x) |
-| `src/test/` | bench programs, excluded from the competition build |
+| `src/test/` | bench programs, excluded from the competition builds |
 
-Dependencies point one way: `generalStrategy` → `Hardware` / `Sensors` →
+Dependencies point one way: a strategy → `Hardware` / `Sensors` →
 `lib/move`. `lib/move` knows nothing about the sensor or which robot it is on:
 `initHardware()` hands it the heading through two function pointers, the
 encoder counts per millimetre (`move.regulator.countsPerMM`, which every move
@@ -253,23 +263,43 @@ contains a bare `return` that is expected to skip everything after it).
 
 ## 5. Building and running
 
-Four PlatformIO environments in [`platformio.ini`](platformio.ini):
+Five PlatformIO environments in [`platformio.ini`](platformio.ini):
 
 | Environment | What it builds | Baud |
 |---|---|---|
-| `megaatmega2560` | the competition firmware (`src/` minus `src/test/`) | 115200 |
+| `general` | competition firmware with the **general strategy** (`src/` minus `src/test/` and `controlStrategy.cpp`) | 115200 |
+| `control` | competition firmware with the **control strategy** (`src/` minus `src/test/` and `generalStrategy.cpp`) | 115200 |
 | `square_test` | 500 mm square bench test — same `Move`, regulator and sensor | 115200 |
 | `heading_test` | BNO08x readout only, the robot does not move | 115200 |
 | `bt_passthrough` | AT-command bridge to the Bluetooth module, the robot does not move | 115200 |
 
-`default_envs = megaatmega2560`: the VSCode toolbar buttons build and flash the
-competition firmware. For the tests use the PlatformIO sidebar (Project Tasks →
+`default_envs = general`: the VSCode toolbar buttons build and flash the general
+strategy. For any other environment use the PlatformIO sidebar (Project Tasks →
 env → Upload) or:
 
 ```
+pio run -e control      -t upload
 pio run -e square_test  -t upload
 pio device monitor -e square_test
 ```
+
+### Strategies
+
+A strategy is one `.cpp` file that defines what [`src/Strategy.h`](src/Strategy.h)
+declares: `routine`, `state`, `startTime`, `strategyName`, and
+`selectOpeningRoutine()`, `handleMicroSwitches()`, `updateEndgameTiming()`,
+`runRoutines()`. `main.cpp` calls those and nothing else, so it is the same for
+every strategy. The environment picks the file; the other strategy is not
+compiled, so it cannot interfere. The robot is still chosen in `Hardware.cpp`
+and every strategy branches on `robotSide`.
+
+- **Switching between matches**: upload the other environment. Then read the
+  first status line on the phone (or the USB boot line): it names the robot
+  and the strategy that is actually running, e.g. `robot LEFT (wall)   strategy
+  general, kicks off`.
+- **Adding a strategy**: copy `controlStrategy.cpp`, give it its own
+  `strategyName`, copy the `[env:control]` block and exclude the other strategy
+  files in its filter.
 
 ### Telemetry (competition firmware)
 
@@ -285,7 +315,7 @@ connects late still sees it:
 
 ```
 ----- status  t 0.0 s -----
-robot     LEFT (wall)   straight 1100 mm
+robot     LEFT (wall)   strategy general, kicks off   straight 1100 mm
 heading   OK      BNO08x 0x4A   reports 812   resets 0
 camera    OK      Pixy2 firmware 3.0.11
 switches  back 1  side 1  start 0   (1 = open)

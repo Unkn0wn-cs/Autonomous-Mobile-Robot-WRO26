@@ -169,11 +169,12 @@ int testI2C();
 // ---------------------------------------------------------------------------
 
 // Opens Serial2 and queues the status block. `robot` names the build in the
-// banner, `straightMM` is the main straight, `mmPerCount` converts encoder
-// counts to mm/s, `openingRoutine` is what selectOpeningRoutine() chose
-// (0-3, or 4 for no ball). Call once at the end of setup().
-void telemetryBegin(const char* robot, int straightMM, float mmPerCount,
-                    int openingRoutine);
+// banner, `strategy` the compiled strategy's name, `straightMM` is the main
+// straight, `mmPerCount` converts encoder counts to mm/s, `openingRoutine` is
+// what selectOpeningRoutine() chose (0-3, or 4 for no ball). Call once at the
+// end of setup().
+void telemetryBegin(const char* robot, const char* strategy, int straightMM,
+                    float mmPerCount, int openingRoutine);
 
 // One call per loop() pass. pwm[] is motor1..motor4 (0 = released) and
 // headingCorr the PWM the heading loop is adding.

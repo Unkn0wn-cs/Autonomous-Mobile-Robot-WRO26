@@ -1,4 +1,6 @@
-// generalStrategy.cpp - the strategy state machine. See generalStrategy.h.
+// generalStrategy.cpp - the general strategy: the lane loop with the purple
+// ball opening, the camera lane choice and the microswitch handling. Built by
+// the `general` environment. See Strategy.h.
 //
 // Several behaviours here look odd but the robot is tuned around them; each is
 // marked KNOWN where it appears. Changing one needs a field test.
@@ -9,9 +11,11 @@
 // library. A few distances are written per robot (robotSide == LEFT ? a : b)
 // because the tuned distance differs per robot.
 
-#include "generalStrategy.h"
+#include "Strategy.h"
 #include "Hardware.h"
 #include "Sensors.h"
+
+const char* strategyName = GENERAL_ENDGAME_KICKS ? "general, kicks on" : "general, kicks off";
 
 int routine = 4;
 int state = 0;
@@ -20,7 +24,7 @@ rlane lane = MIDDLE;
 
 int connections;
 
-int startTime;
+unsigned long startTime;
 
 int pesos[NUM_FRANJAS] = {0};
 
@@ -398,26 +402,29 @@ void handleMicroSwitches() {
 
 // ---------------------------------------------------------------------------
 
-void updateEndgameTiming() { //DO NOT DELETE THIS FUNCTION, IT IS USED TO TIME THE ENDGAME
-    // Last Routine Code ----------------------------------------------
-  // if (lastRoutine == false &&  (millis() > 105000 + startTime) ){ //&& (routine != 7 && routine != 5)
-  //   lastRoutine = true;
-  //   lane = OUTER;
-  //   lenght -= 30;
-  // }
-  // if (midRoutine == false && midRoutineDone == false && (millis() > 45000 + startTime) ){ //&& (routine != 7 && routine != 5)
-  //   midRoutine = true;
-  //   if (routine != 4 && lane != OUTER){
-  //     lane = OUTER;
-  //   } else {
-  //     lane = MIDDLE;
-  //   }
-  //   lenght -= 30;
-  // } else if(midRoutine == true && (millis() > 61000 + startTime) && (millis() < 100000 + startTime)){
-  //   midRoutine = false;
-  //   midRoutineDone = true;
-  //   lenght += 30;
-  // }
+void updateEndgameTiming() {
+  if (!GENERAL_ENDGAME_KICKS) return;   // constant: everything below is compiled out
+
+  unsigned long t = millis() - startTime;
+
+  if (lastRoutine == false && t > GENERAL_LATE_KICK_MS){
+    lastRoutine = true;
+    lane = OUTER;
+    lenght -= 30;
+  }
+  if (midRoutine == false && midRoutineDone == false && t > GENERAL_MID_KICK_MS){
+    midRoutine = true;
+    if (routine != 4 && lane != OUTER){
+      lane = OUTER;
+    } else {
+      lane = MIDDLE;
+    }
+    lenght -= 30;
+  } else if(midRoutine == true && t > GENERAL_MID_DONE_MS && t < GENERAL_MID_END_MS){
+    midRoutine = false;
+    midRoutineDone = true;
+    lenght += 30;
+  }
 }
 
 // ---------------------------------------------------------------------------

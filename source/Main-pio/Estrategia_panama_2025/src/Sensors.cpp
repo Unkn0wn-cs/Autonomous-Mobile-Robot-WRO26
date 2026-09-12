@@ -284,6 +284,7 @@ static const unsigned long BLUETOOTH_BAUD = 9600;
 static const uint8_t STATUS_LINES = 8;
 
 static const char*   robotName          = "";
+static const char*   strategyLabel      = "";
 static int           straightLength     = 0;
 static float         mmPerEncoderCount  = 0.0f;
 static int           openingRoutineSeen = 4;
@@ -330,8 +331,8 @@ static int statusLine(uint8_t k) {
                         t / 1000, (t % 1000) / 100);
     }
     case 1:
-      return snprintf_P(line, N, PSTR("robot     %s   straight %d mm\r\n"),
-                        robotName, straightLength);
+      return snprintf_P(line, N, PSTR("robot     %s   strategy %s   straight %d mm\r\n"),
+                        robotName, strategyLabel, straightLength);
     case 2:
       if (headingAddress() == 0)
         return snprintf_P(line, N, PSTR("heading   NOT FOUND   no BNO08x on I2C\r\n"));
@@ -398,12 +399,13 @@ static int rowLine(int routine, int state, const int pwm[4], float headingCorr,
     pwm[0], pwm[1], pwm[2], pwm[3], v[0], v[1], v[2], v[3]);
 }
 
-void telemetryBegin(const char* robot, int straightMM, float mmPerCount,
-                    int openingRoutine) {
+void telemetryBegin(const char* robot, const char* strategy, int straightMM,
+                    float mmPerCount, int openingRoutine) {
   if (!TELEMETRY) return;
   Serial2.begin(BLUETOOTH_BAUD);
 
   robotName          = robot;
+  strategyLabel      = strategy;
   straightLength     = straightMM;
   mmPerEncoderCount  = mmPerCount;
   openingRoutineSeen = openingRoutine;
