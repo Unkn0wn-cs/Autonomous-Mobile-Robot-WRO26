@@ -257,21 +257,22 @@ longer than 200 mm finishes differently, with `Move::backwardEnd`
 
 | Field | Value | Meaning |
 |---|---|---|
-| `decelCounts` | 250 mm | length of the deceleration curve |
+| `decelCounts` | 100 mm | length of the deceleration curve |
 | `endSpeedMMs` | 200 mm/s | speed at the end of the curve — the approach speed |
-| `creepCounts` | 150 mm | the approach speed is held over the last 150 mm of the commanded distance |
+| `creepCounts` | 100 mm | the approach speed is held over the last 100 mm of the commanded distance |
 
 ```
 toCreep = max(remaining − creepCounts, 0)
 vCmd    = vEnd + (vPeak − vEnd) · sqrt(toCreep / decelCounts)      vEnd = 200 mm/s
 ```
 
-so the robot is at 200 mm/s from 150 mm before the target onwards and meets
-the wall at that speed wherever it comes. `creepCounts` is clamped to 60 % of
-the move and `decelCounts` to what is left after the accel ramp and the creep;
-for the 890 mm reverses that is ramp 196 → cruise 294 → curve 250 → hold 150,
-for `backward(280)` ramp 62 → curve 68 → hold 150. The hold alone takes
-0.75 s of the 4 s `moveTimeoutMs`.
+so the robot stays at cruise until 200 mm before the target, brakes hard over
+100 mm and is at 200 mm/s for the last 100 mm: a wall inside that stretch is
+met at 200 mm/s, one that comes earlier is met while still braking.
+`creepCounts` is clamped to 60 % of the move and `decelCounts` to what is left
+after the accel ramp and the creep; for the 890 mm reverses that is ramp 196 →
+cruise 494 → curve 100 → hold 100, for `backward(280)` ramp 62 → cruise 18 →
+curve 100 → hold 100. The hold takes 0.5 s of the 4 s `moveTimeoutMs`.
 
 `Move::longBackwardMM` (200) is compared in counts, converted the same way the
 move's own distance is, so `backward(200)` and everything shorter keep the
@@ -399,8 +400,8 @@ run re-references the heading mid-move and points at a supply problem.
 | Starts with a jolt | lower `rampStartPWM` toward 200, or raise `rampFraction` |
 | Overshoots the target (square_test `overshoot`) | lower `endSpeedFraction` / `minEndSpeedMMs` (slower arrival), or raise `decelFraction` / `maxDecelCounts` (earlier slowdown); if `encoder errors` climb during the move, the counting itself is the problem |
 | Stops short / crawls the last part | raise `minEndSpeedMMs`, or lower `decelFraction` |
-| Reverses hit the back wall too hard | lower `backwardEnd.endSpeedMMs` (200); if the wall comes more than 150 mm before the commanded distance, raise `backwardEnd.creepCounts` — each costs time against the 4 s `moveTimeoutMs` |
-| Reverses crawl for too long / time out | raise `backwardEnd.endSpeedMMs`, or shorten `backwardEnd.creepCounts` / `decelCounts` |
+| Reverses hit the back wall too hard | lower `backwardEnd.endSpeedMMs` (200); if the wall comes more than 100 mm before the commanded distance, raise `backwardEnd.creepCounts` — each costs time against the 4 s `moveTimeoutMs` |
+| Reverses slow down too early / crawl for too long | shorten `backwardEnd.creepCounts` (100) and `decelCounts` (100), or raise `backwardEnd.endSpeedMMs` |
 | Speed hunts during decel (`v` oscillates about the command) | lower `kSpeedP`, then `kSpeedI` |
 | Too slow overall | raise `cruisePWM` — the differential still arrives in full, the set is shifted down when needed |
 | Long moves cut short | they hit `moveTimeoutMs` (4 s) — telemetry `s` stuck then advancing at 4 s |

@@ -40,7 +40,8 @@
   int pwms[4] = {200, 200, 200, 200};
   extern const long pulses = 1350;  // encoder counts per wheel revolution
   side robotSide = RIGHT;
-  int slowRotorSpeed = 180;
+  int slowRotorSpeed = 140;
+  int fastRotorSpeed = 200;
   int closedGate =116;
   int openGate = 0;
   int lenght = 640;
@@ -90,7 +91,7 @@ void enableSlowDrivers() {
 
 void enableDrivers() {
   pinMode(enable34, OUTPUT);
-  analogWrite(enable34, 254);
+  analogWrite(enable34, fastRotorSpeed);
 }
 
 void disableDrivers() {
@@ -148,14 +149,14 @@ void initHardware() {
   move.regulator.maxDecelCounts       = (long)(200.0f * countsPerMM);
 
   // Wall approach: backward moves longer than 200 mm meet the back wall
-  // before their commanded distance (routine 6 reverses lenght + 250, the
-  // wall comes up to 150 mm early). They brake over 250 mm down to 200 mm/s
-  // and hold that speed over the last 150 mm, so the wall is met at 200 mm/s
-  // wherever it comes. The hold alone takes 0.75 s of the 4 s moveTimeoutMs;
-  // a slower approach or a longer hold costs more.
+  // before their commanded distance (routine 6 reverses lenght + 250). They
+  // stay at cruise until 200 mm before the target, brake hard over 100 mm
+  // down to 200 mm/s and hold that speed over the last 100 mm, so a wall
+  // inside that stretch is met at 200 mm/s and one that comes earlier is met
+  // while still braking. The hold takes 0.5 s of the 4 s moveTimeoutMs.
   move.longBackwardMM          = 200;
-  move.backwardEnd.decelCounts = (long)(250.0f * countsPerMM);
-  move.backwardEnd.creepCounts = (long)(150.0f * countsPerMM);
+  move.backwardEnd.decelCounts = (long)(100.0f * countsPerMM);
+  move.backwardEnd.creepCounts = (long)(100.0f * countsPerMM);
   move.backwardEnd.endSpeedMMs = 200.0f;
 
   // Gate servo.

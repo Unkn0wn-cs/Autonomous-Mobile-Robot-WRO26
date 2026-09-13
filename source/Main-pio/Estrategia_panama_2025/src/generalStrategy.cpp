@@ -503,14 +503,15 @@ switch (routine) {//------------------------------------------------------------
         if(move.stopForMillis(mili)) state++;
         break;
       case 2:
-        if(move.forward(550)) state++;
+        if(move.forward(650)) state++;
         break;
       case 3:
         state++;
         break;
       case 4:
         myservo.write(closedGate);
-        if(move.forward(250)) state++;
+        enableSlowDrivers();
+        if(move.forward(150)) state++;
         break;
       case 5:
         routine = 6; state = 0;
@@ -539,6 +540,7 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 5:
         myservo.write(closedGate);
+        enableSlowDrivers();
         if(move.forward(250)) state++;
         break;
       case 6:
@@ -739,9 +741,9 @@ switch (routine) {//------------------------------------------------------------
     switch(state){
       case -1:
         if (robotSide == RIGHT){
-          if(move.backwardp(lenght, true)) state = 1;
+          if(move.backwardp(lenght + 50, true)) state = 1;
         }else{
-          if(move.backwardp(lenght, false)) state = 1;
+          if(move.backwardp(lenght + 50, false)) state = 1;
         }
         break;
       case 0:

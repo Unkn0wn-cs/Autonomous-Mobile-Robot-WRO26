@@ -190,9 +190,10 @@ Routine 6 drives back `lenght + 250` — **further than the field is long**. The
 advances `state`; the bumper, not the encoder, normally ends the move. The same
 switch press zeroes the heading reference (`headingZero()`), because the robot
 is square against the wall at that moment. Because the wall comes before the
-commanded distance, backward moves longer than 200 mm brake down to 200 mm/s
-and hold that speed over the last 150 mm of the command (the wall approach in
-[Movement.md](lib/move/Movement.md)), so the bumper is met at that speed.
+commanded distance, backward moves longer than 200 mm brake hard over 100 mm
+down to 200 mm/s and hold that speed over the last 100 mm of the command (the
+wall approach in [Movement.md](lib/move/Movement.md)), so the bumper is met at
+that speed.
 
 The switches are accurate enough to stop movement just before the wall — but
 only when the robot arrives square to it. If it arrives misaligned, one corner
