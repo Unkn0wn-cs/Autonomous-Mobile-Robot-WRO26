@@ -30,8 +30,6 @@ enum RoutineId {
   OuterCornerCheck  = 13
 };
 
-enum ExpectedSwitch { ExpectNoSwitch, ExpectBackSwitch, ExpectSideSwitch };
-
 int routine = MainLoop;
 int state   = 0;
 bool first = false;
@@ -54,67 +52,20 @@ static const unsigned long GateCloseMs = 250;
 static const unsigned long OrangeEjectMs = 2000;
 static const unsigned long EarlyGameMs = 45000;
 
-// Initial values from the nearest proven movements in generalStrategy.cpp.
-static const int InitialBackAlignmentMM = 100;
-static const int UpperLeftAdvanceMM = 505;
-static const int OuterWallSearchMM = 750;
-static const int RedundantWallSearchMM = 180;
-static const int LaneSpacingMM = 180;
-static const int FullLaneExtraMM = 50;
-static const int CornerCheckMM = 550;
-static const float QuarterTurnDeg = 90.0f;
-static const unsigned long TurnTimeoutMs = 2500;
-
-static ExpectedSwitch ExpectedContact = ExpectNoSwitch;
-static int ExpectedContactNextState = 0;
 static bool EarlyGameExpired = false;
-static int SelectedLaneOffsetMM = LaneSpacingMM;
 static int RoutineAfterSweep = OrangeCollection;
 
-static void ExpectContact(ExpectedSwitch Contact, int NextState) {
-  ExpectedContact = Contact;
-  ExpectedContactNextState = NextState;
-}
-
-static void SetRotorMinimum() {
+// Rotor modes used only by the control strategy.
+static void enableControlSlowDrivers() {
   digitalWrite(input3, HIGH);
   digitalWrite(input4, LOW);
   analogWrite(enable34, RotorMinPwm);
 }
 
-static void SetRotorReverseFull() {
+static void enableControlReverseDrivers() {
   digitalWrite(input3, LOW);
   digitalWrite(input4, HIGH);
   analogWrite(enable34, RotorReversePwm);
-}
-
-static void StopRotor() { analogWrite(enable34, 0); }
-
-static bool RotateQuarterTurn(bool Clockwise) {
-  static bool Turning = false;
-  static bool ActiveClockwise = false;
-  static unsigned long TurnStarted = 0;
-
-  if (!headingAvailable()) {
-    move.stop();
-    Turning = false;
-    return false;
-  }
-  if (!Turning || ActiveClockwise != Clockwise) {
-    headingZero();
-    ActiveClockwise = Clockwise;
-    TurnStarted = millis();
-    Turning = true;
-  }
-  if (Clockwise) move.rotateCW(pwms[0], pwms[1], pwms[2], pwms[3]);
-  else           move.rotateCCW(pwms[0], pwms[1], pwms[2], pwms[3]);
-
-  float Turned = headingSinceZero();
-  bool Reached = Clockwise ? Turned >= QuarterTurnDeg : Turned <= -QuarterTurnDeg;
-  if (!Reached && millis() - TurnStarted < TurnTimeoutMs) return false;
-  move.stop();
-  Turning = false;
-  return true;
 }
 
 int classifyLane(float X, float Y, bool RightRobot) {
@@ -134,10 +85,9 @@ int classifyLane(float X, float Y, bool RightRobot) {
 }
 
 static void BeginNormalLoop() {
-  ExpectedContact = ExpectNoSwitch;
   lane = OUTER;
   first = false;
-  SetRotorMinimum();
+  enableControlSlowDrivers();
   routine = MainLoop;
   state = -1;
 }
@@ -338,21 +288,16 @@ void handleMicroSwitches() {
   bool CurrentSideSwitchState = digitalRead(sideSwitchPin);
 
   if (CurrentTime - MicroSwitchTime > 350) {
-    if (ExpectedContact == ExpectBackSwitch &&
-        CurrentBackSwitchState == LOW && LastBackSwitchState == HIGH) {
+    if (CurrentBackSwitchState == LOW && LastBackSwitchState == HIGH) {
       MicroSwitchTime = CurrentTime;
-      ExpectedContact = ExpectNoSwitch;
-      move.stop();
       headingZero();
-      state = ExpectedContactNextState;
+      if (!(routine == ReturnAndClassify && state == 2)) state++;
       Serial.println(F("Heading zeroed by back switch"));
     }
-    if (ExpectedContact == ExpectSideSwitch &&
-        CurrentSideSwitchState == LOW && LastSideSwitchState == HIGH) {
+    if (CurrentSideSwitchState == LOW && LastSideSwitchState == HIGH &&
+        routine != MainLoop && !(routine == CornerReset && state == 8)) {
       MicroSwitchTime = CurrentTime;
-      ExpectedContact = ExpectNoSwitch;
-      move.stop();
-      state = ExpectedContactNextState;
+      state++;
     }
   }
   LastBackSwitchState = CurrentBackSwitchState;
@@ -381,58 +326,48 @@ void runRoutines() {
     case OpeningUpperRight:
     case OpeningLowerLeft:
     case OpeningLowerRight:
-      ExpectedContact = ExpectNoSwitch;
       move.stop();
-      SetRotorMinimum();
+      enableControlSlowDrivers();
       break;
 
     // No-purple opening, then the first mandatory INNER sweep.
     case OrangeCollection:
       switch (state) {
         case 0:
-          ExpectContact(ExpectBackSwitch, 1);
-          if (move.backward(InitialBackAlignmentMM)) {
-            ExpectedContact = ExpectNoSwitch; headingZero(); state++;
+          if (move.backward(100)) {
+            headingZero(); state++;
           }
           break;
         case 1:
           myservo.write(closedGate);
-          SetRotorMinimum();
+          enableControlSlowDrivers();
           if (move.stopForMillis(mili)) state++;
           break;
         case 2:
-          if (move.forward(UpperLeftAdvanceMM)) state++;
+          if (move.forward(505)) state++;
           break;
         case 3: // LEFT side switch faces the OUTER wall.
-          ExpectContact(ExpectSideSwitch, 4);
-          if (move.left(OuterWallSearchMM)) {
-            ExpectedContact = ExpectNoSwitch; state++;
-          }
+          if (move.left(750)) state++;
           break;
         case 4:
           myservo.write(closedGate);
           if (move.stopForMillis(GateCloseMs)) state++;
           break;
         case 5:
-          SetRotorReverseFull();
+          enableControlReverseDrivers();
           if (move.stopForMillis(OrangeEjectMs)) state++;
           break;
         case 6:
-          SetRotorMinimum();
-          ExpectContact(ExpectBackSwitch, 7);
+          enableControlSlowDrivers();
           if (move.backward(lenght + 250)) {
-            ExpectedContact = ExpectNoSwitch; headingZero(); state++;
+            headingZero(); state++;
           }
           break;
         case 7:
-          ExpectContact(ExpectSideSwitch, 8);
-          if (move.left(RedundantWallSearchMM)) {
-            ExpectedContact = ExpectNoSwitch; state++;
-          }
+          if (move.left(180)) state++;
           break;
         case 8:
           lane = INNER;
-          SelectedLaneOffsetMM = 2 * LaneSpacingMM;
           RoutineAfterSweep = OrangeCollection;
           routine = LaneSweep;
           state = 0;
@@ -440,7 +375,7 @@ void runRoutines() {
         case 9: // Safe corner: scan only MIDDLE and INNER.
           if (EarlyGameExpired) { BeginNormalLoop(); break; }
           pesos[0] = pesos[1] = pesos[2] = 0;
-          SetRotorMinimum();
+          enableControlSlowDrivers();
           state++;
           break;
         case 10:
@@ -454,7 +389,6 @@ void runRoutines() {
           }
           if (move.stopForMillis(mili / 2)) {
             lane = (pesos[2] > pesos[1]) ? INNER : MIDDLE;
-            SelectedLaneOffsetMM = lane == INNER ? 2 * LaneSpacingMM : LaneSpacingMM;
             RoutineAfterSweep = OuterCornerCheck;
             routine = LaneSweep;
             state = 0;
@@ -467,40 +401,48 @@ void runRoutines() {
     // the rear OUTER corner, which keeps competition tuning local to constants.
     case LaneSweep:
       switch (state) {
-        case 0: if (move.right(SelectedLaneOffsetMM)) state++; break;
-        case 1:
-          SetRotorMinimum();
-          if (move.forwardRegulated(lenght + FullLaneExtraMM) == 1) state++;
+        case 0:
+          if (lane == INNER) {
+            if (move.right(360)) state++;
+          } else {
+            if (move.right(180)) state++;
+          }
           break;
-        case 2: StopRotor(); if (move.stopForMillis(mili)) state++; break;
-        case 3: if (RotateQuarterTurn(false)) state++; break;
+        case 1:
+          enableControlSlowDrivers();
+          if (move.forwardRegulated(lenght + 50) == 1) state++;
+          break;
+        case 2: disableDrivers(); if (move.stopForMillis(mili)) state++; break;
+        case 3: if (move.rotate(166, true)) state++; break;
         case 4: myservo.write(closedGate); if (move.stopForMillis(GateCloseMs)) state++; break;
-        case 5: SetRotorReverseFull(); if (move.stopForMillis(OrangeEjectMs)) state++; break;
-        case 6: SetRotorMinimum(); state++; break;
-        case 7: if (RotateQuarterTurn(true)) state++; break;
+        case 5:
+          enableControlReverseDrivers();
+          if (move.stopForMillis(OrangeEjectMs)) state++;
+          break;
+        case 6:
+          enableControlSlowDrivers();
+          state++;
+          break;
+        case 7: if (move.rotate(166, false)) state++; break;
         case 8:
-          ExpectContact(ExpectBackSwitch, 9);
-          if (move.backward(lenght + FullLaneExtraMM)) {
-            ExpectedContact = ExpectNoSwitch; headingZero(); state++;
+          if (move.backward(lenght + 50)) {
+            headingZero(); state++;
           }
           break;
         case 9:
-          ExpectContact(ExpectSideSwitch, 10);
-          if (move.left(SelectedLaneOffsetMM)) {
-            ExpectedContact = ExpectNoSwitch; state++;
+          if (lane == INNER) {
+            if (move.left(360)) state++;
+          } else {
+            if (move.left(180)) state++;
           }
           break;
         case 10:
-          ExpectContact(ExpectBackSwitch, 11);
-          if (move.backward(InitialBackAlignmentMM)) {
-            ExpectedContact = ExpectNoSwitch; headingZero(); state++;
+          if (move.backward(100)) {
+            headingZero(); state++;
           }
           break;
         case 11:
-          ExpectContact(ExpectSideSwitch, 12);
-          if (move.left(RedundantWallSearchMM)) {
-            ExpectedContact = ExpectNoSwitch; state++;
-          }
+          if (move.left(180)) state++;
           break;
         case 12:
           routine = RoutineAfterSweep;
@@ -513,23 +455,25 @@ void runRoutines() {
       switch (state) {
         case 0:
           if (EarlyGameExpired) { BeginNormalLoop(); break; }
-          SetRotorMinimum();
-          if (move.forward(CornerCheckMM)) state++;
+          enableControlSlowDrivers();
+          if (move.forward(550)) state++;
           break;
         case 1: myservo.write(closedGate); if (move.stopForMillis(GateCloseMs)) state++; break;
-        case 2: SetRotorReverseFull(); if (move.stopForMillis(OrangeEjectMs)) state++; break;
-        case 3: SetRotorMinimum(); if (move.backward(CornerCheckMM)) state++; break;
+        case 2:
+          enableControlReverseDrivers();
+          if (move.stopForMillis(OrangeEjectMs)) state++;
+          break;
+        case 3:
+          enableControlSlowDrivers();
+          if (move.backward(550)) state++;
+          break;
         case 4:
-          ExpectContact(ExpectBackSwitch, 5);
-          if (move.backward(InitialBackAlignmentMM)) {
-            ExpectedContact = ExpectNoSwitch; headingZero(); state++;
+          if (move.backward(100)) {
+            headingZero(); state++;
           }
           break;
         case 5:
-          ExpectContact(ExpectSideSwitch, 6);
-          if (move.left(RedundantWallSearchMM)) {
-            ExpectedContact = ExpectNoSwitch; state++;
-          }
+          if (move.left(180)) state++;
           break;
         case 6: routine = OrangeCollection; state = 9; break;
       }
@@ -539,18 +483,18 @@ void runRoutines() {
     // outer-wall pass, then calls the same camera-return routine.
     case MainLoop:
       switch (state) {
-        case -1: disableDrivers(); if (RotateQuarterTurn(false)) state--; break;
+        case -1: disableDrivers(); if (move.rotate(166, true)) state--; break;
         case -2: if (move.outer(95)) state--; break;
         case -3: if (move.forwardp(400, false)) state--; break;
         case -4: enableDrivers(); if (move.stopForMillis(mili)) state--; break;
-        case -5: disableDrivers(); if (RotateQuarterTurn(true)) state--; break;
+        case -5: disableDrivers(); if (move.rotate(166, false)) state--; break;
         case -6: if (move.outer(30)) state = 0; break;
         case 0: enableDrivers(); if (move.backward(280)) state++; break;
         case 1: if (move.stopForMillis(mili)) state++; break;
         case 2: {
           int Result = lane == OUTER ? move.forwardp(lenght + 50, false)
                                      : move.forwardRegulated(lenght + 50);
-          if (Result == 2) SetRotorMinimum();
+          if (Result == 2) enableControlSlowDrivers();
           if (Result == 1) state++;
           break;
         }
@@ -600,7 +544,6 @@ void runRoutines() {
       break;
 
     default:
-      ExpectedContact = ExpectNoSwitch;
       move.stop();
       break;
   }
