@@ -431,6 +431,11 @@ void updateEndgameTiming() {
 
 void runRoutines() {
 
+// Capture routines cruise lower. The regulator reads cruisePWM every tick and
+// `routine` only changes between moves, so each move runs whole at one level.
+static const int normalCruisePWM = move.regulator.cruisePWM;   // as set by initHardware()
+move.regulator.cruisePWM = (routine <= 3) ? GENERAL_CAPTURE_CRUISE_PWM : normalCruisePWM;
+
 switch (routine) {//---------------------------------------------------------------------------------------ROUTINES---------------------------------------------------------//
   case 0:
     switch(state){
@@ -438,24 +443,26 @@ switch (routine) {//------------------------------------------------------------
         if(move.backward(100)) state++;
         break;
       case 1:
+        analogWrite(9, 180); //Rotor capture speed
         myservo.write(closedGate);
         if(move.stopForMillis(mili)) state++;
         break;
       case 2:
-        if(move.forward(505)) state++;
+        if(move.forward(550)) state++;
         break;
       case 3:
         state++;
         break;
       case 4:
         myservo.write(openGate);
-        if(move.forward(350)) state++;
+        enableDrivers();
+        if(move.forward(400)) state++;
         break;
       case 5:
-        myservo.write(closedGate);
-        if(move.stopForMillis(mili)) state++;
+        if(move.stopForMillis(500)) state++;
         break;
       case 6:
+        myservo.write(closedGate);
         routine = 6; state = 0;
         if (robotSide == RIGHT){
           lane = OUTER;
@@ -465,13 +472,14 @@ switch (routine) {//------------------------------------------------------------
   case 1:
     switch(state){
       case 0:
-        if (move.right(200)) state++;
+        if (move.right(250)) state++;
         break;
       case 1:
         if(move.backward(100)) state++;
         break;
       case 2:
         myservo.write(closedGate);
+        analogWrite(9, 160); //Rotor capture speed
         if(move.stopForMillis(mili)) state++;
         break;
       case 3:
@@ -482,13 +490,14 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 5:
         myservo.write(openGate);
-        if(move.forward(350)) state++;
+        enableDrivers();
+        if(move.forward(370)) state++;
         break;
       case 6:
-        myservo.write(closedGate);
-        if(move.stopForMillis(mili)) state++;
+        if(move.stopForMillis(500)) state++;
         break;
       case 7:
+        myservo.write(closedGate);
         routine = 6; state = 0;
         lane = MIDDLE;
       }
@@ -523,7 +532,7 @@ switch (routine) {//------------------------------------------------------------
   case 3:
     switch(state){
       case 0:
-        if(move.right(200)) state++;
+        if(move.right(250)) state++;
         break;
       case 1:
         if(move.backward(100)) state++;
@@ -712,7 +721,7 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 8:
         if (robotSide == RIGHT){
-          if(move.forwardq(lenght/3 + 150, true)){state++;}
+          if(move.forwardq(lenght/3 + 220, true)){state++;}
         } else {
           if(move.forwardq(lenght/2 + 160, false)){state++;}
         }

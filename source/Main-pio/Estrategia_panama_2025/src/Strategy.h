@@ -63,6 +63,12 @@ static const unsigned long GENERAL_MID_DONE_MS   = 61000;
 static const unsigned long GENERAL_MID_END_MS    = 100000;
 static const unsigned long GENERAL_LATE_KICK_MS  = 105000;
 
+// Cruise PWM while a purple-ball capture routine (0-3) is running. Every
+// other routine cruises at the value initHardware() gave the regulator. The
+// drive layer is otherwise identical: accel ramp, closed-loop deceleration,
+// brake and heading hold all run as they do at the normal cruise.
+static const int GENERAL_CAPTURE_CRUISE_PWM = 180;
+
 // Which lane of the field the robot is currently running. OUTER is furthest
 // from the centre wall, INNER closest; move.inner()/move.outer() translate
 // that into a left or right strafe for this robot.
