@@ -29,6 +29,7 @@
 //   routine 5     diagonal lane
 //   routine 6     return, then camera weighting picks the next lane
 //   routine 7     corner checking reset, encoder-counted turns
+//   routine 8     heading recovery: stop, turn back to the boot heading, routine 6
 //   routine 9     parking / Pixy ball tracking
 //   routine 10    debugging
 //
@@ -63,11 +64,18 @@ static const unsigned long GENERAL_MID_DONE_MS   = 61000;
 static const unsigned long GENERAL_MID_END_MS    = 100000;
 static const unsigned long GENERAL_LATE_KICK_MS  = 105000;
 
-// Cruise PWM while a purple-ball capture routine (0-3) is running. Every
-// other routine cruises at the value initHardware() gave the regulator. The
-// drive layer is otherwise identical: accel ramp, closed-loop deceleration,
-// brake and heading hold all run as they do at the normal cruise.
-static const int GENERAL_CAPTURE_CRUISE_PWM = 180;
+// Heading recovery (routine 8). Every pass of runRoutines() compares the
+// heading since power-on with where the current step should point (0 up the
+// field; a quarter turn on the corner legs of routines 4 and 7). The robot is
+// switched on square in its start box, so that reference is the mat itself;
+// the back-wall zero is not used because a robot that reaches the wall skewed
+// captures a skewed zero. LOST_DEG or more off -> routine 8: stop, turn
+// open-loop at TURN_PWM while watching the sensor until within DONE_DEG of
+// the boot heading, then the return (routine 6), which reverses to the back
+// wall and picks the next lane. Never triggers without a fresh sensor reading.
+static const float GENERAL_HEADING_LOST_DEG = 45.0f;
+static const float GENERAL_HEADING_DONE_DEG = 8.0f;
+static const int   GENERAL_HEADING_TURN_PWM = 200;
 
 // Which lane of the field the robot is currently running. OUTER is furthest
 // from the centre wall, INNER closest; move.inner()/move.outer() translate
@@ -133,7 +141,8 @@ int classifyLane(float x, float y, bool right);
 void selectOpeningRoutine();
 
 // Edge detects the two microswitches and advances `state`. A back switch press
-// also zeroes the heading.
+// also zeroes the heading. Neither switch advances routine 8, so a bump during
+// the recovery turn cannot skip one of its steps.
 void handleMicroSwitches();
 
 // The match clock for the endgame kicks (GENERAL_ENDGAME_KICKS above). Call

@@ -121,6 +121,16 @@ extern const int ballZones[NUM_BALL_ZONES][4];
 const int diameter = 60;  // wheel diameter in mm; with `pulses` gives counts/mm
 
 // ---------------------------------------------------------------------------
+// Cruise levels, identical on both robots. The regulator drives every wheel
+// at the cruise plus that wheel's trim from pwmf[]/pwms[]; the rest of the
+// movement calibration is in initHardware().
+// ---------------------------------------------------------------------------
+
+extern const int normalCruisePWM;   // every routine
+extern const int captureCruisePWM;  // the purple-ball captures, routines 0-3.
+
+
+// ---------------------------------------------------------------------------
 // Drivetrain: four 45-degree omni wheels on the Adafruit Motor Shield v1.
 //
 // Layout seen from above, front of the robot pointing up:

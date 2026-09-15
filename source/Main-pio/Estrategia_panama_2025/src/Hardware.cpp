@@ -58,6 +58,15 @@
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
+// Cruise levels, identical on both robots. The regulator drives every wheel
+// at the cruise plus that wheel's trim from pwmf[]/pwms[]; the rest of the
+// movement calibration is in initHardware().
+// ---------------------------------------------------------------------------
+
+const int normalCruisePWM  = 232;  // every routine
+const int captureCruisePWM = 180;  // the purple-ball captures, routines 0-3.
+
+// ---------------------------------------------------------------------------
 // Motors, on the Adafruit Motor Shield v1.
 // ---------------------------------------------------------------------------
 
@@ -121,43 +130,84 @@ void initHardware() {
   // independent of the sensor. HEADING_SIGN is applied inside Sensors.cpp.
   move.setHeadingHooks(&regulatorHeadingError, &headingCaptureTarget);
 
-  // PWM levels for these motors: wheels break free at ~200, so the accel ramp
-  // starts just above that; 255 is the ceiling. Cruise sits below the ceiling
-  // so the heading differential has room before the regulator has to shift
-  // the whole set down.
+  // =========================================================================
+  // MOVEMENT CALIBRATION. Every number that decides how the robot drives is
+  // set here (the per-robot trims pwmf/pwms and the cruise levels are in the
+  // blocks above and in Hardware.h). Each wheel runs at
+  //     common + trim + heading differential
+  // where common follows the speed profile below.
+  // =========================================================================
+
+  // ---- PWM levels ---------------------------------------------------------
+  // The wheels break free at ~180 PWM, so the accel ramp starts just above
+  // that. Cruise sits below maxPWM so the heading differential has room before
+  // the regulator has to shift the whole set down.
   move.regulator.maxPWM       = 248;
-  move.regulator.rampStartPWM = 205;
-  move.regulator.cruisePWM    = 232;
+  move.regulator.rampStartPWM = 185;
+  move.regulator.cruisePWM    = normalCruisePWM;
 
-  // Heading hold: PWM of differential per degree, and the most it may apply.
-  // Proportional only for the first run; see WheelRegulator.h for I and D.
-  move.regulator.kHeadingP            = 12.0f;
-  move.regulator.kHeadingI            = 0.0f;
-  move.regulator.kHeadingD            = 0.0f;
-  move.regulator.maxHeadingCorrection = 40;
+  // ---- Wall-hug trims -----------------------------------------------------
+  // PWM one diagonal pair is pushed up or down in forwardp / backwardp /
+  // forwardq so the robot presses against the wall it runs along.
+  move.forwardpTrim  = 9;
+  move.backwardpTrim = 6;
+  move.forwardqTrim  = 9;
 
-  // Distances the regulator works in, given in mm because the two robots count
-  // very differently per millimetre.
+  // ---- Speed profile: shape -----------------------------------------------
+  // Lengths in mm because the two robots count very differently per
+  // millimetre.
   //   burst  moves shorter than this run straight at cruise with no ramp,
   //          no deceleration and no correction - wall nudges
-  //   ramp   the accel ramp length (22 % of the move, clamped to this range)
-  //   decel  the closed-loop deceleration length (30 % of the move, clamped)
+  //   ramp   the open-loop accel ramp, rampFraction of the move clamped to
+  //          min..max
+  //   decel  the closed-loop deceleration, decelFraction of the move clamped
+  //          to min..max
   move.regulator.burstThresholdCounts = (long)(30.0f  * countsPerMM);
+  move.regulator.rampFraction         = 0.22f;
   move.regulator.minRampCounts        = (long)(25.0f  * countsPerMM);
   move.regulator.maxRampCounts        = (long)(220.0f * countsPerMM);
+  move.regulator.decelFraction        = 0.30f;
   move.regulator.minDecelCounts       = (long)(40.0f  * countsPerMM);
   move.regulator.maxDecelCounts       = (long)(200.0f * countsPerMM);
 
-  // Wall approach: backward moves longer than 200 mm meet the back wall
-  // before their commanded distance (routine 6 reverses lenght + 250). They
-  // stay at cruise until 200 mm before the target, brake hard over 100 mm
-  // down to 200 mm/s and hold that speed over the last 100 mm, so a wall
-  // inside that stretch is met at 200 mm/s and one that comes earlier is met
-  // while still braking. The hold takes 0.5 s of the 4 s moveTimeoutMs.
+  // ---- Speed profile: the deceleration loop -------------------------------
+  // A PI on the mean encoder speed brings the robot from the speed it had
+  // when the decel began down to a creep at the target: endSpeedFraction of
+  // that speed, never below minEndSpeedMMs. stallEscapePWM is added per tick
+  // while the robot is under half the creep speed, so a wheel stuck on a low
+  // PWM is freed.
+  move.regulator.kSpeedP          = 0.15f;   // PWM per mm/s of error
+  move.regulator.kSpeedI          = 2.0f;    // PWM per mm/s per second
+  move.regulator.endSpeedFraction = 0.15f;
+  move.regulator.minEndSpeedMMs   = 40.0f;
+  move.regulator.stallEscapePWM   = 2;
+
+  // ---- Wall approach ------------------------------------------------------
+  // Backward moves longer than longBackwardMM meet the back wall before their
+  // commanded distance (routine 6 reverses lenght + 250). They stay at cruise
+  // until 200 mm before the target, brake hard over 100 mm down to 200 mm/s
+  // and hold that speed over the last 100 mm, so a wall inside that stretch
+  // is met at 200 mm/s and one that comes earlier is met while still
+  // braking. The hold takes 0.5 s of the 4 s moveTimeoutMs.
   move.longBackwardMM          = 200;
   move.backwardEnd.decelCounts = (long)(100.0f * countsPerMM);
   move.backwardEnd.creepCounts = (long)(100.0f * countsPerMM);
   move.backwardEnd.endSpeedMMs = 200.0f;
+
+  // ---- Heading hold -------------------------------------------------------
+  // PID on the BNO08x error, output a PWM differential between the wheel
+  // pairs. Proportional only for the first run; I and D starting points are
+  // 3.0 and 0.6. Errors inside the deadband do not drive the P term.
+  move.regulator.kHeadingP            = 12.0f;   // PWM per degree
+  move.regulator.kHeadingI            = 0.0f;
+  move.regulator.kHeadingD            = 0.0f;
+  move.regulator.headingDeadbandDeg   = 0.12f;
+  move.regulator.maxHeadingCorrection = 40;      // PWM, per wheel pair
+  move.regulator.headingIntegralLimit = 12.0f;   // PWM
+
+  // ---- Timing -------------------------------------------------------------
+  move.regulator.updateIntervalMs = 4;      // regulator tick, ms
+  move.moveTimeoutMs              = 4000;   // hard cap on any single move
 
   // Gate servo.
   myservo.attach(10);

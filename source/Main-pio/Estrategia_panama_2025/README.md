@@ -203,8 +203,27 @@ instead. That is what the corner reset in routine 7 recovers from.
 Routine 7 is the full corner reset: reverse into the wall, nudge forward, turn
 by encoder count (`rotate(146)`), strafe out, run 550 mm, reverse, turn
 again (`rotate(166)`), and finish with two small trim rotations. Every turn
-in the routines is encoder-counted; the heading sensor only holds the heading
-during straights and strafes.
+in the routines is encoder-counted; the heading sensor holds the heading
+during straights and strafes, and drives the recovery turn below.
+
+### Heading recovery (routine 8)
+
+Every pass of `runRoutines()` compares the heading since power-on with where
+the current step should be pointing: 0° up the field, or a quarter turn
+towards the outer wall on the corner legs (routine 4 states −2..−4, routine 7
+states 5..11). The reference is the power-on heading — the robot is switched on
+square in its start box — not the back-wall zero, because a robot that reaches
+the wall skewed captures a skewed zero. The check is skipped while a turn is
+running and while the sensor is stale.
+
+`GENERAL_HEADING_LOST_DEG` (45°) or more off and routine 8 takes over, whatever
+the robot was doing: stop, rotor off, then turn open-loop at
+`GENERAL_HEADING_TURN_PWM` (200) while watching the sensor until the heading is
+within `GENERAL_HEADING_DONE_DEG` (8°) of the power-on heading, then run the
+return (routine 6): reverse to the back wall, read the camera, pick the next
+lane. The three constants are in [`src/Strategy.h`](src/Strategy.h). A robot
+that cannot get square keeps re-entering routine 8 from routine 6; there is no
+give-up.
 
 Routine 5 is the diagonal lane: strafe in, reverse, forward, then a genuine
 diagonal (`forwardLeft` / `forwardRight`, which drives only two of the four

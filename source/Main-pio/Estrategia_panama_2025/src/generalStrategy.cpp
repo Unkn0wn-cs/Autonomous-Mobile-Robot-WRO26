@@ -1,6 +1,6 @@
 // generalStrategy.cpp - the general strategy: the lane loop with the purple
-// ball opening, the camera lane choice and the microswitch handling. Built by
-// the `general` environment. See Strategy.h.
+// ball opening, the camera lane choice, the microswitch handling and the
+// heading recovery. Built by the `general` environment. See Strategy.h.
 //
 // Several behaviours here look odd but the robot is tuned around them; each is
 // marked KNOWN where it appears. Changing one needs a field test.
@@ -31,6 +31,27 @@ int pesos[NUM_FRANJAS] = {0};
 bool lastRoutine = false;
 bool midRoutine = false;
 bool midRoutineDone = false;
+
+// ---------------------------------------------------------------------------
+
+// Where the current step should be pointing, in degrees from the boot heading
+// (sign of headingSinceBoot()): 0 up the field, except on the corner legs
+// where the robot has turned a quarter towards its outer wall. NAN while a
+// turn is running and in routine 8 itself - the heading watchdog skips those.
+static float expectedHeading() {
+  const float corner = (robotSide == RIGHT) ? 90.0f : -90.0f;
+  switch (routine) {
+    case 4:
+      if (state == -1 || state == -5) return NAN;               // turning
+      return (state <= -2) ? corner : 0.0f;
+    case 7:
+      if (state == 4 || state == 12) return NAN;                // turning
+      return (state >= 5 && state <= 11) ? corner : 0.0f;
+    case 8:
+      return NAN;
+  }
+  return 0.0f;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -385,12 +406,12 @@ void handleMicroSwitches() {
         // Button pressed: the robot is square against the back wall, so the
         // heading is zeroed there.
         headingZero();
-        if (!(routine == 6 && state == 2)){
+        if (!(routine == 6 && state == 2) && routine != 8){
           state++;
         }
         Serial.println("Heading zeroed by microswitch");
       }
-      if (currentSideSwitchState == LOW && lastSideSwitchState == HIGH && routine!= 4  && !(routine == 7 && state == 8)  ) {
+      if (currentSideSwitchState == LOW && lastSideSwitchState == HIGH && routine!= 4  && !(routine == 7 && state == 8) && routine != 8) {
         microSwitchTime = millis();
         // Button pressed
         state++;
@@ -433,8 +454,18 @@ void runRoutines() {
 
 // Capture routines cruise lower. The regulator reads cruisePWM every tick and
 // `routine` only changes between moves, so each move runs whole at one level.
-static const int normalCruisePWM = move.regulator.cruisePWM;   // as set by initHardware()
-move.regulator.cruisePWM = (routine <= 3) ? GENERAL_CAPTURE_CRUISE_PWM : normalCruisePWM;
+move.regulator.cruisePWM = (routine <= 3) ? captureCruisePWM : normalCruisePWM;
+
+// Heading watchdog: GENERAL_HEADING_LOST_DEG or more from where this step
+// should point -> routine 8. Needs a fresh reading: a stale sensor reads 0,
+// which on a corner leg would look like a lost heading.
+float wanted = expectedHeading();
+if (headingAvailable() && !isnan(wanted) &&
+    fabs(headingSinceBoot() - wanted) >= GENERAL_HEADING_LOST_DEG) {
+  routine = 8;
+  state = 0;
+  Serial.println(F("heading lost -> routine 8"));
+}
 
 switch (routine) {//---------------------------------------------------------------------------------------ROUTINES---------------------------------------------------------//
   case 0:
@@ -975,6 +1006,34 @@ switch (routine) {//------------------------------------------------------------
         lane = OUTER;
         break;
 
+    }
+  break;
+  case 8: // Heading recovery: stop, turn until square to the mat, return
+    switch(state){
+      case 0:
+        disableDrivers();
+        if(move.stopForMillis(mili)) state++;
+        break;
+      case 1: {
+        // Open-loop turn towards the boot heading, watched on the sensor.
+        // A positive reading means the robot turned the B F F B way.
+        float off = headingSinceBoot();
+        if (off > GENERAL_HEADING_DONE_DEG) {
+          move.rotateCCW(GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM);
+        } else if (off < -GENERAL_HEADING_DONE_DEG) {
+          move.rotateCW(GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM);
+        } else {
+          move.stop();
+          state++;
+        }
+        break;
+      }
+      case 2:
+        if(move.stopForMillis(mili)) {
+          routine = 6;
+          state = 0;
+        }
+        break;
     }
   break;
   case 9:

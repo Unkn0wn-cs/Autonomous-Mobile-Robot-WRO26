@@ -57,7 +57,10 @@ class WheelRegulator {
 
     enum Phase { Accel, Cruise, Decel };
 
-    // ---- PWM levels (overridden in initHardware()) ---------------------------
+    // Every parameter below is a library default; initHardware() sets each
+    // one for the robot it runs on.
+
+    // ---- PWM levels ---------------------------------------------------------
     int maxPWM       = 248;
     int rampStartPWM = 205;   // where the accel ramp starts: just above breakaway
     int cruisePWM    = 232;   // open-loop cruise

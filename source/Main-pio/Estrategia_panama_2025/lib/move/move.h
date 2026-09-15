@@ -60,6 +60,13 @@ class Move {
     int longBackwardMM = 0;
     WheelRegulator::EndSpec backwardEnd;
 
+    // Wall-hug trims: the PWM one diagonal pair is pushed up (position false)
+    // or down (position true) in forwardp / backwardp / forwardq, so the robot
+    // presses against the wall it runs along. Set in initHardware().
+    int forwardpTrim  = 9;
+    int backwardpTrim = 6;
+    int forwardqTrim  = 9;
+
     // PWM values for forward/backward
     int pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4;
     // PWM values for left/right/diagonals
@@ -137,15 +144,16 @@ class Move {
     }
 
     // ---- Wall-hugging straights ------------------------------------------
-    // forwardp/backwardp/forwardq trim one diagonal pair by +-d so the robot
-    // presses against the wall it is running along. They run in Profile mode:
-    // speed profile only, no heading hold, because the wall does the aligning.
+    // forwardp/backwardp/forwardq trim one diagonal pair by their wall-hug
+    // trim so the robot presses against the wall it is running along. They
+    // run in Profile mode: speed profile only, no heading hold, because the
+    // wall does the aligning.
     //
     // forwardp returns 1 when the full distance is reached (and stops), 2 once
     // 14/22 of it is reached (without stopping), 0 otherwise.
     int forwardp(int millimetres, bool position) {
       long pulses = toCounts(millimetres);
-      const int d = 9;
+      const int d = forwardpTrim;
       if (position == false){
         armMotion(MOTION_FORWARDP_NEAR, WheelRegulator::Profile, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
       }else{
@@ -175,7 +183,7 @@ class Move {
 
     bool backwardp(int millimetres, bool position) {
       long pulses = toCounts(millimetres);
-      const int d = 6;
+      const int d = backwardpTrim;
       if (position == false){
         armMotion(MOTION_BACKWARDP_NEAR, WheelRegulator::Profile, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
       }else{
@@ -188,7 +196,7 @@ class Move {
 
     bool forwardq(int millimetres, bool position) {
       long pulses = toCounts(millimetres);
-      const int d = 9;
+      const int d = forwardqTrim;
       if (position == false){
         armMotion(MOTION_FORWARDQ_NEAR, WheelRegulator::Profile, pulses, pwmFwd1, pwmFwd2 + d, pwmFwd3 + d, pwmFwd4);
       }else{
