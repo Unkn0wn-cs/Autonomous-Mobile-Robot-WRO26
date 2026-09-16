@@ -469,7 +469,7 @@ switch (routine) {//------------------------------------------------------------
         if(move.backward(100)) state++;
         break;
       case 1:
-        analogWrite(9, slowRotorSpeed); //Rotor capture speed
+        analogWrite(9, captureRotorSpeed); //Rotor capture speed
         myservo.write(closedGate);
         if(move.stopForMillis(mili)) state++;
         break;
@@ -477,17 +477,20 @@ switch (routine) {//------------------------------------------------------------
         if(move.forward(430)) state++;
         break;
       case 3:
-        if(move.stopForMillis(900)) state++;
+        if(move.stopForMillis(950)) state++;
         break;
       case 4:
         myservo.write(openGate);
+        if(move.stopForMillis(120)) state++;
+        break;
+      case 5:
         enableDrivers();
         if(move.forward(430)) state++;
         break;
-      case 5:
+      case 6:
         if(move.stopForMillis(700)) state++;
         break;
-      case 6:
+      case 7:
         myservo.write(closedGate);
         routine = 6; state = 0;
         if (robotSide == RIGHT){
@@ -505,7 +508,7 @@ switch (routine) {//------------------------------------------------------------
         if(move.backward(200)) state++;
         break;
       case 2:
-        analogWrite(9, slowRotorSpeed); //Rotor capture speed
+        analogWrite(9, captureRotorSpeed); //Rotor capture speed
         myservo.write(closedGate);
         if(move.stopForMillis(mili)) state++;
         break;
@@ -722,7 +725,7 @@ switch (routine) {//------------------------------------------------------------
     switch(state){
       case 0:
         if(robotSide == RIGHT){
-          if(move.inner(40)) state++;
+          if(move.inner(30)) state++;
         } else{
           if(move.inner(80)) state++;
         }

@@ -64,6 +64,7 @@ extern int pwms[4];
 
 extern const long pulses;    // encoder counts per wheel revolution
 extern int slowRotorSpeed;   // rotor PWM used by enableSlowDrivers()
+extern int captureRotorSpeed;
 extern int closedGate;       // servo angle: gate closed (storing)
 extern int openGate;         // servo angle: gate open (shooting)
 extern int lenght;           // length of the main straight in mm
