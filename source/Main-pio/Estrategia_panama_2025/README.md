@@ -179,9 +179,9 @@ to be open at the moment the robot passes over where the ball was seen:
 6. strafe outward again → drop into state 0 and run the straight above
 
 On the OUTER lane the straight (routine 4 state 2) uses `forwardp` and the
-return (routine 6 state −1) uses `backwardp`: two wheels are trimmed ±9 / ±6 so
-the robot presses against the wall it runs along. Those moves run the speed profile only (no
-heading hold) — the wall aligns them.
+return (routine 6 state −1) uses `backwardp`: the heading PID holds the robot
+leaning `wallHugDeg` (per robot, `Hardware.cpp`) toward the wall, so the
+leading corner stays pressed on it without the robot ever turning into it.
 
 ### Returning and re-localising (routines 6 and 7)
 

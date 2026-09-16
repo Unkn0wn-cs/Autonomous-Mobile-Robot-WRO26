@@ -60,12 +60,11 @@ class Move {
     int longBackwardMM = 0;
     WheelRegulator::EndSpec backwardEnd;
 
-    // Wall-hug trims: the PWM one diagonal pair is pushed up (position false)
-    // or down (position true) in forwardp / backwardp / forwardq, so the robot
-    // presses against the wall it runs along. Set in initHardware().
-    int forwardpTrim  = 9;
-    int backwardpTrim = 6;
-    int forwardqTrim  = 9;
+    // Wall hug: the angle, in degrees, that forwardp / backwardp / forwardq
+    // hold toward the wall they run along. The heading PID keeps the robot
+    // at that angle, so the leading corner presses on the wall and the angle
+    // can never grow into a turn. Set in initHardware().
+    float wallHugDeg = 2.0f;
 
     // PWM values for forward/backward
     int pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4;
@@ -144,23 +143,30 @@ class Move {
     }
 
     // ---- Wall-hugging straights ------------------------------------------
-    // forwardp/backwardp/forwardq trim one diagonal pair by their wall-hug
-    // trim so the robot presses against the wall it is running along. They
-    // run in Profile mode: speed profile only, no heading hold, because the
-    // wall does the aligning.
+    // forwardp/backwardp/forwardq run in Hold mode with the heading target
+    // offset by wallHugDeg toward the wall: the PID settles the robot at that
+    // angle and holds it there, so the leading corner stays pressed on the
+    // wall and wall friction cannot turn the robot further.
+    //
+    //   position false : the wall is on the robot's LEFT  (the LEFT robot)
+    //   position true  : the wall is on the robot's RIGHT (the RIGHT robot)
+    //
+    // The heading reading increases when the robot turns right, so leaning
+    // right means feeding the PID `error - wallHugDeg`, leaning left
+    // `error + wallHugDeg`. Reversing, the tail leads, so the nose points the
+    // other way. forwardq hugs the inner (centre) wall, the mirror of forwardp.
     //
     // forwardp returns 1 when the full distance is reached (and stops), 2 once
     // 14/22 of it is reached (without stopping), 0 otherwise.
     int forwardp(int millimetres, bool position) {
       long pulses = toCounts(millimetres);
-      const int d = forwardpTrim;
       if (position == false){
-        armMotion(MOTION_FORWARDP_NEAR, WheelRegulator::Profile, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
+        armMotion(MOTION_FORWARDP_NEAR, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
       }else{
-        armMotion(MOTION_FORWARDP_FAR, WheelRegulator::Profile, pulses, pwmFwd1 - d, pwmFwd2, pwmFwd3, pwmFwd4 - d);
+        armMotion(MOTION_FORWARDP_FAR, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
       }
 
-      runRegulated(FORWARD, FORWARD, FORWARD, FORWARD);
+      runRegulated(FORWARD, FORWARD, FORWARD, FORWARD, position ? -wallHugDeg : wallHugDeg);
       if (checkDoneWithTimeout(pulses)){
         return 1;
       } else if (checkDoneWithTimeout(((pulses / 22)*14), true)){
@@ -183,27 +189,25 @@ class Move {
 
     bool backwardp(int millimetres, bool position) {
       long pulses = toCounts(millimetres);
-      const int d = backwardpTrim;
       if (position == false){
-        armMotion(MOTION_BACKWARDP_NEAR, WheelRegulator::Profile, pulses, pwmFwd1 + d, pwmFwd2, pwmFwd3, pwmFwd4 + d);
+        armMotion(MOTION_BACKWARDP_NEAR, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
       }else{
-        armMotion(MOTION_BACKWARDP_FAR, WheelRegulator::Profile, pulses, pwmFwd1 - d, pwmFwd2, pwmFwd3, pwmFwd4 - d);
+        armMotion(MOTION_BACKWARDP_FAR, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
       }
 
-      runRegulated(BACKWARD, BACKWARD, BACKWARD, BACKWARD);
+      runRegulated(BACKWARD, BACKWARD, BACKWARD, BACKWARD, position ? wallHugDeg : -wallHugDeg);
       return checkDoneWithTimeout(pulses);
     }
 
     bool forwardq(int millimetres, bool position) {
       long pulses = toCounts(millimetres);
-      const int d = forwardqTrim;
       if (position == false){
-        armMotion(MOTION_FORWARDQ_NEAR, WheelRegulator::Profile, pulses, pwmFwd1, pwmFwd2 + d, pwmFwd3 + d, pwmFwd4);
+        armMotion(MOTION_FORWARDQ_NEAR, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
       }else{
-        armMotion(MOTION_FORWARDQ_FAR, WheelRegulator::Profile, pulses, pwmFwd1, pwmFwd2 - d, pwmFwd3 - d, pwmFwd4);
+        armMotion(MOTION_FORWARDQ_FAR, WheelRegulator::Hold, pulses, pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4);
       }
 
-      runRegulated(FORWARD, FORWARD, FORWARD, FORWARD);
+      runRegulated(FORWARD, FORWARD, FORWARD, FORWARD, position ? wallHugDeg : -wallHugDeg);
       return checkDoneWithTimeout(pulses);
     }
 
@@ -499,7 +503,10 @@ class Move {
 
     // Drives the four motors in the requested directions, then re-asserts the
     // regulated PWM for this instant. Called once per loop() while a move runs.
-    void runRegulated(uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4) {
+    // `headingOffsetDeg` shifts the heading the PID holds (the wall moves lean
+    // by wallHugDeg); 0 holds the heading the move started on.
+    void runRegulated(uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4,
+                      float headingOffsetDeg = 0.0f) {
       setMotors(d1, d2, d3, d4);
 
       const uint8_t dirs[WheelRegulator::WHEEL_COUNT] = {d1, d2, d3, d4};
@@ -520,8 +527,8 @@ class Move {
         dirSign[i] = (dirs[i] == FORWARD) ? 1 : ((dirs[i] == BACKWARD) ? -1 : 0);
       }
 
-      // Fresh heading error every tick.
-      regulator.headingErrorDeg = headingSource ? headingSource() : 0.0f;
+      // Fresh heading error every tick, shifted by the offset this move holds.
+      regulator.headingErrorDeg = headingSource ? headingSource() + headingOffsetDeg : 0.0f;
 
       regulator.update(driven, progress, dirSign);
 

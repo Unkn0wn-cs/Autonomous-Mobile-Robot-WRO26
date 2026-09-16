@@ -175,16 +175,19 @@ microswitch advanced `state`), the next call re-arms from the current counts.
 |---|---|---|---|
 | `forward`, `backward`, `left`, `right` | Hold | yes | front encoder ≥ target, or timeout |
 | `forwardRegulated` | Hold | yes | returns 1 at target, 2 at 14/22 of it |
-| `forwardp`, `backwardp`, `forwardq` | Profile | no | as above (`forwardp` also returns 2 at 14/22) |
+| `forwardp`, `backwardp`, `forwardq` | Hold, leaning `wallHugDeg` toward the wall | yes | as above (`forwardp` also returns 2 at 14/22) |
 | `forwardLeft`, `forwardRight`, `backwardLeft`, `backwardRight` | Profile | no | front encoder ≥ target, or timeout |
 | `rotate` | Profile | no | front encoder ≥ target, or timeout |
 | `rotateCW`, `rotateCCW` | none | no | open-loop at a fixed PWM; the caller stops it |
 | `stop` | – | – | brakes all four motors and holds them |
 | `stopForMillis` | – | – | brakes, returns true after the delay (one shared timer) |
 
-`forwardp` / `backwardp` / `forwardq` trim one diagonal pair by ±9 / ±6 / ±9 so
-the robot presses against the wall it runs along; the wall aligns them, so they
-run without heading hold.
+`forwardp` / `backwardp` / `forwardq` hold the heading they started on shifted
+by `wallHugDeg` (per robot, `Hardware.cpp`) toward the wall they run along: the
+heading PID keeps the robot at that lean, so the leading corner stays pressed on
+the wall and friction cannot turn it further. `position` says which side the
+wall is on (`false` left, `true` right); reversing, the tail leads so the nose
+leans the other way; `forwardq` hugs the inner wall, the mirror of `forwardp`.
 
 ### Trims
 
@@ -219,8 +222,8 @@ public members, set in `initHardware()` (`src/Hardware.cpp`).
 | Mode | Speed profile | Heading PID | Used by |
 |---|---|---|---|
 | Burst | no — straight to `cruisePWM`, brake at the target | no | any move shorter than 30 mm (wall nudges) |
-| Profile | yes | no | wall-hugging straights, diagonals, rotations |
-| Hold | yes | yes | forward / backward / left / right / forwardRegulated |
+| Profile | yes | no | diagonals, rotations |
+| Hold | yes | yes | forward / backward / left / right / forwardRegulated, and the wall-hugging straights with a `wallHugDeg` lean |
 
 ### Speed profile (encoders)
 

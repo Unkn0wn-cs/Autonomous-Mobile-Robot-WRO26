@@ -401,7 +401,7 @@ void handleMicroSwitches() {
         // Button pressed: the robot is square against the back wall, so the
         // heading is zeroed there.
         headingZero();
-        if (!(routine == 6 && state == 2) && routine != 8){
+        if (!(routine == 6 && state == 2) && !(routine == 5 && state == 0) && routine != 8){
           state++;
         }
         Serial.println("Heading zeroed by microswitch");
@@ -502,7 +502,7 @@ switch (routine) {//------------------------------------------------------------
         if (move.right(250)) state++;
         break;
       case 1:
-        if(move.backward(100)) state++;
+        if(move.backward(200)) state++;
         break;
       case 2:
         analogWrite(9, slowRotorSpeed); //Rotor capture speed
@@ -517,13 +517,17 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 5:
         myservo.write(openGate);
+        if(move.stopForMillis(100)) state++;
+        break;
+      case 6:
+        myservo.write(openGate);
         enableDrivers();
         if(move.forward(430)) state++;
         break;
-      case 6:
+      case 7:
         if(move.stopForMillis(700)) state++;
         break;
-      case 7:
+      case 8:
         myservo.write(closedGate);
         routine = 6; state = 0;
         lane = MIDDLE;
@@ -562,7 +566,7 @@ switch (routine) {//------------------------------------------------------------
         if(move.right(250)) state++;
         break;
       case 1:
-        if(move.backward(100)) state++;
+        if(move.backward(250)) state++;
         break;
       case 2:
         myservo.write(openGate);
@@ -623,7 +627,7 @@ switch (routine) {//------------------------------------------------------------
         if (robotSide == RIGHT){
           if(move.rotate(166, true)) state--;
         }else{
-          if(move.rotate(166, false)) state--;
+          if(move.rotate(186, false)) state--;
         }
         break;
       case -6:
@@ -717,7 +721,11 @@ switch (routine) {//------------------------------------------------------------
     enableDrivers();
     switch(state){
       case 0:
-        if(move.inner(60)) state++;
+        if(robotSide == RIGHT){
+          if(move.inner(40)) state++;
+        } else{
+          if(move.inner(100)) state++;
+        }
         break;
       case 1:
         if(move.stopForMillis(mili)) state++;
@@ -796,12 +804,12 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 4: // Complex logic for Ramp robot redundancy and lane correction
         if (!(lane == OUTER) && first == true){
-          if(move.inner(180)) state++;
+          if(move.inner(240)) state++;
         } else if (first == true){
           state = 7;
           break;
         }else if(!first){
-          if(move.inner(180)) state++;
+          if(move.inner(240)) state++;
         }
         pixy.setLamp(0, 0);
         break;
@@ -961,7 +969,7 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 12:
         if(robotSide != RIGHT){
-          if(move.rotate(166, false)) state++;
+          if(move.rotate(186, false)) state++;
         } else {
           if(move.rotate(166, true)) state++;
         }

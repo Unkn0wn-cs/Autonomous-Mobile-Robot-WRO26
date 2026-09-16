@@ -17,14 +17,18 @@
 // ===========================================================================
 // LEFT - WALL
 // ===========================================================================
-  // int pwmf[4] = {255, 255, 255, 255};
+  // int pwmf[4] = {243, 243, 243, 243};
   // int pwms[4] = {255, 255, 255, 255};
   // extern const long pulses = 800;  // encoder counts per wheel revolution
   // side robotSide = LEFT;
   // int slowRotorSpeed = 90;
   // int fastRotorSpeed = 200;
-  // const int normalCruisePWM  = 255;  // every routine
+  // const int maxPWM           = 255;  // ceiling for every wheel
+  // const int minPWM           = 235;  // floor for every driven wheel and the decel loop
+  // const int rampStartPWM     = 235;  // where the accel ramp starts
+  // const int normalCruisePWM  = 250;  // every routine
   // const int captureCruisePWM = 240;
+  // const float wallHugDeg     = 3.0f; // angle the wall moves hold toward the wall
   // const int headingLostDeg   = 70;   // off north by this -> routine 8
   // const int headingSquareDeg = 8;    // routine 8 stops turning inside this
   // const int headingTurnPWM   = 230;  // routine 8's open-loop turn
@@ -48,14 +52,18 @@
   side robotSide = RIGHT;
   int slowRotorSpeed = 120;
   int fastRotorSpeed = 200;
+  const int maxPWM           = 255;  // ceiling for every wheel
+  const int minPWM           = 235;  // floor for every driven wheel and the decel loop
+  const int rampStartPWM     = 235;  // where the accel ramp starts
   const int normalCruisePWM  = 230;  // every routine
   const int captureCruisePWM = 190;
+  const float wallHugDeg     = 2.0f; // angle the wall moves hold toward the wall
   const int headingLostDeg   = 70;   // off north by this -> routine 8
   const int headingSquareDeg = 8;    // routine 8 stops turning inside this
   const int headingTurnPWM   = 230;  // routine 8's open-loop turn
   int closedGate =116;
   int openGate = 0;
-  int lenght = 640;
+  int lenght = 680;
   // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
   extern const int ballZones[NUM_BALL_ZONES][4] = {
     { 142,  32,  160,  15 },   // routine 0 - upper left
@@ -140,24 +148,22 @@ void initHardware() {
   // where common follows the speed profile below.
   // =========================================================================
 
-  // ---- PWM levels ---------------------------------------------------------
-  // The wheels need ~200 PWM to break free, so minPWM holds every driven
-  // wheel at or above that: the deceleration loop cannot go below it and a
-  // heading correction that would push one pair under it is clipped there.
-  // Cruise is at maxPWM, so a correction shifts the slow pair down rather
-  // than the fast pair up; rampStartPWM at maxPWM starts every move at full
-  // power.
-  move.regulator.maxPWM       = 255;
-  move.regulator.minPWM       = 220;
-  move.regulator.rampStartPWM = 220;
+  // ---- PWM levels (per robot, from the block above) ------------------------
+  // minPWM holds every driven wheel at or above the level the wheels need to
+  // keep turning: the deceleration loop cannot go below it and a heading
+  // correction that would push one pair under it is clipped there. A
+  // correction that would push a wheel over maxPWM shifts the whole set down
+  // instead. The accel ramp runs from rampStartPWM up to the cruise.
+  move.regulator.maxPWM       = maxPWM;
+  move.regulator.minPWM       = minPWM;
+  move.regulator.rampStartPWM = rampStartPWM;
   move.regulator.cruisePWM    = normalCruisePWM;
 
-  // ---- Wall-hug trims -----------------------------------------------------
-  // PWM one diagonal pair is pushed up or down in forwardp / backwardp /
-  // forwardq so the robot presses against the wall it runs along.
-  move.forwardpTrim  = 7;
-  move.backwardpTrim = 0;
-  move.forwardqTrim  = 5;
+  // ---- Wall hug -----------------------------------------------------------
+  // forwardp / backwardp / forwardq hold this angle toward the wall with the
+  // heading PID: enough lean to keep the leading corner on the wall, held so
+  // it cannot grow into a turn. Per robot (weaker motors need more angle).
+  move.wallHugDeg = wallHugDeg;
 
   // ---- Speed profile: shape -----------------------------------------------
   // Lengths in mm because the two robots count very differently per

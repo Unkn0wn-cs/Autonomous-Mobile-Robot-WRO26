@@ -126,8 +126,12 @@ const int diameter = 60;  // wheel diameter in mm; with `pulses` gives counts/mm
 // movement calibration is in initHardware().
 // ---------------------------------------------------------------------------
 
+extern const int maxPWM;            // ceiling for every wheel
+extern const int minPWM;            // floor for every driven wheel and the decel loop
+extern const int rampStartPWM;      // where the accel ramp starts
 extern const int normalCruisePWM;   // every routine
 extern const int captureCruisePWM;  // the purple-ball captures, routines 0-3.
+extern const float wallHugDeg;      // degrees the wall moves lean toward the wall
 
 // Heading recovery (routine 8 in the general strategy): how far off north the
 // robot may point before it stops and turns back, how close it must get, and
