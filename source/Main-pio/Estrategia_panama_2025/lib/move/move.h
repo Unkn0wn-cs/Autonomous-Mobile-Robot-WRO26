@@ -258,33 +258,34 @@ class Move {
     }
 
     // ---- Diagonals -------------------------------------------------------
-    // Two wheels drive, two are released. Burst mode: full power to the
-    // target, no profile and no heading hold, braked at the count.
+    // Two wheels drive, two are released. BurstHold mode: full power to the
+    // target, no profile, braked at the count, and the heading PID keeps the
+    // robot pointing the way the move started.
 
     bool forwardLeft(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_FORWARD_LEFT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_FORWARD_LEFT, WheelRegulator::BurstHold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(RELEASE, FORWARD, RELEASE, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     bool forwardRight(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_FORWARD_RIGHT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_FORWARD_RIGHT, WheelRegulator::BurstHold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(FORWARD, RELEASE, FORWARD, RELEASE);
       return checkDoneWithTimeout(pulses);
     }
 
     bool backwardLeft(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_BACKWARD_LEFT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_BACKWARD_LEFT, WheelRegulator::BurstHold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(BACKWARD, RELEASE, BACKWARD, RELEASE);
       return checkDoneWithTimeout(pulses);
     }
 
     bool backwardRight(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_BACKWARD_RIGHT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_BACKWARD_RIGHT, WheelRegulator::BurstHold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(RELEASE, BACKWARD, RELEASE, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }

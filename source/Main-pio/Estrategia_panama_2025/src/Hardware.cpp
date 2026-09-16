@@ -17,60 +17,60 @@
 // ===========================================================================
 // LEFT - WALL
 // ===========================================================================
-  // int pwmf[4] = {243, 243, 243, 243};
-  // int pwms[4] = {255, 255, 255, 255};
-  // extern const long pulses = 800;  // encoder counts per wheel revolution
-  // side robotSide = LEFT;
-  // int slowRotorSpeed = 90;
-  // int fastRotorSpeed = 200;
-  // const int maxPWM           = 255;  // ceiling for every wheel
-  // const int minPWM           = 235;  // floor for every driven wheel and the decel loop
-  // const int rampStartPWM     = 235;  // where the accel ramp starts
-  // const int normalCruisePWM  = 250;  // every routine
-  // const int captureCruisePWM = 240;
-  // const float wallHugDeg     = 3.0f; // angle the wall moves hold toward the wall
-  // const int headingLostDeg   = 70;   // off north by this -> routine 8
-  // const int headingSquareDeg = 8;    // routine 8 stops turning inside this
-  // const int headingTurnPWM   = 230;  // routine 8's open-loop turn
-  // int closedGate = 180;
-  // int openGate = 55;
-  // int lenght = 1100;
-  // // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
-  // extern const int ballZones[NUM_BALL_ZONES][4] = {
-  //   { 135,  20,  160,   0 },   // routine 0 - upper left
-  //   { 235,  25,  260,  10 },   // routine 1 - upper right
-  //   { 135,  40,  160,  20 },   // routine 2 - lower left
-  //   { 260,  55,  290,  25 }    // routine 3 - lower right
-  // };
-
-// ===========================================================================
-// RIGHT - RAMP
-// ===========================================================================
-  int pwmf[4] = {220, 243, 243, 220};
-  int pwms[4] = {200, 200, 200, 200};
-  extern const long pulses = 1350;  // encoder counts per wheel revolution
-  side robotSide = RIGHT;
-  int slowRotorSpeed = 120;
+  int pwmf[4] = {243, 243, 243, 243};
+  int pwms[4] = {255, 255, 255, 255};
+  extern const long pulses = 800;  // encoder counts per wheel revolution
+  side robotSide = LEFT;
+  int slowRotorSpeed = 90;
   int fastRotorSpeed = 200;
   const int maxPWM           = 255;  // ceiling for every wheel
   const int minPWM           = 235;  // floor for every driven wheel and the decel loop
   const int rampStartPWM     = 235;  // where the accel ramp starts
-  const int normalCruisePWM  = 230;  // every routine
-  const int captureCruisePWM = 190;
-  const float wallHugDeg     = 2.0f; // angle the wall moves hold toward the wall
+  const int normalCruisePWM  = 250;  // every routine
+  const int captureCruisePWM = 240;
+  const float wallHugDeg     = 3.0f; // angle the wall moves hold toward the wall
   const int headingLostDeg   = 70;   // off north by this -> routine 8
   const int headingSquareDeg = 8;    // routine 8 stops turning inside this
   const int headingTurnPWM   = 230;  // routine 8's open-loop turn
-  int closedGate =116;
-  int openGate = 0;
-  int lenght = 680;
+  int closedGate = 180;
+  int openGate = 55;
+  int lenght = 1100;
   // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
   extern const int ballZones[NUM_BALL_ZONES][4] = {
-    { 142,  32,  160,  15 },   // routine 0 - upper left
-    { 245,  33,  260,  20 },   // routine 1 - upper right
-    { 143,  51,  170,  25 },   // routine 2 - lower left
-    { 271,  60,  290,  35 }    // routine 3 - lower right
+    { 135,  20,  160,   0 },   // routine 0 - upper left
+    { 235,  25,  260,  10 },   // routine 1 - upper right
+    { 135,  40,  160,  20 },   // routine 2 - lower left
+    { 260,  55,  290,  25 }    // routine 3 - lower right
   };
+
+// ===========================================================================
+// RIGHT - RAMP
+// ===========================================================================
+  // int pwmf[4] = {220, 243, 243, 220};
+  // int pwms[4] = {200, 200, 200, 200};
+  // extern const long pulses = 1350;  // encoder counts per wheel revolution
+  // side robotSide = RIGHT;
+  // int slowRotorSpeed = 120;
+  // int fastRotorSpeed = 200;
+  // const int maxPWM           = 255;  // ceiling for every wheel
+  // const int minPWM           = 190;  // floor for every driven wheel and the decel loop
+  // const int rampStartPWM     = 210;  // where the accel ramp starts
+  // const int normalCruisePWM  = 230;  // every routine
+  // const int captureCruisePWM = 190;
+  // const float wallHugDeg     = 3.0f; // angle the wall moves hold toward the wall
+  // const int headingLostDeg   = 70;   // off north by this -> routine 8
+  // const int headingSquareDeg = 8;    // routine 8 stops turning inside this
+  // const int headingTurnPWM   = 230;  // routine 8's open-loop turn
+  // int closedGate =116;
+  // int openGate = 0;
+  // int lenght = 680;
+  // // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
+  // extern const int ballZones[NUM_BALL_ZONES][4] = {
+  //   { 142,  32,  160,  15 },   // routine 0 - upper left
+  //   { 245,  33,  260,  20 },   // routine 1 - upper right
+  //   { 143,  51,  170,  25 },   // routine 2 - lower left
+  //   { 271,  60,  290,  35 }    // routine 3 - lower right
+  // };
 
 // ===========================================================================
 // Everything below is the same on both robots.
@@ -170,7 +170,8 @@ void initHardware() {
   // millimetre.
   //   burst  moves shorter than this run straight at cruise with no ramp,
   //          no deceleration and no correction - wall nudges. The diagonals
-  //          run this way whatever their length.
+  //          run at cruise with no ramp whatever their length, but with the
+  //          heading held.
   //   ramp   the open-loop accel ramp, rampFraction of the move clamped to
   //          min..max
   //   decel  the closed-loop deceleration, decelFraction of the move clamped

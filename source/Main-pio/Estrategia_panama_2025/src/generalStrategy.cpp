@@ -724,7 +724,7 @@ switch (routine) {//------------------------------------------------------------
         if(robotSide == RIGHT){
           if(move.inner(40)) state++;
         } else{
-          if(move.inner(100)) state++;
+          if(move.inner(80)) state++;
         }
         break;
       case 1:

@@ -47,10 +47,13 @@ class WheelRegulator {
 
     // How much control a move asks for.
     enum Mode {
-      // Very short nudges, usually finishing against a wall, and the diagonals
-      // whatever their length. Straight to cruise PWM, no profile and no
-      // correction: the wall does the aligning, or two wheels get everything.
+      // Very short nudges, usually finishing against a wall. Straight to
+      // cruise PWM, no profile and no correction: the wall does the aligning.
       Burst,
+      // Burst power with the heading PID: straight to cruise PWM, no profile,
+      // heading held. The diagonals, whatever their length - two wheels get
+      // everything and the robot keeps pointing the way it started.
+      BurstHold,
       // Speed profile only, no heading hold. Wall-hugging straights (the wall
       // aligns them) and rotations (a turn is meant to change the heading).
       Profile,
@@ -143,7 +146,9 @@ class WheelRegulator {
       _target = targetCounts > 0 ? targetCounts : 0;
 
       _mode = mode;
-      if (_target <= 0 || _target < burstThresholdCounts) _mode = Burst;
+      if (_target <= 0 || _target < burstThresholdCounts) {
+        if (_mode != BurstHold) _mode = Burst;
+      }
 
       long ramp = (long)(_target * rampFraction);
       if (ramp < minRampCounts) ramp = minRampCounts;
@@ -219,10 +224,10 @@ class WheelRegulator {
       float dt = elapsed * 0.001f;
       _lastUpdate = now;
 
-      if (_mode == Burst) {
+      if (_mode == Burst || _mode == BurstHold) {
         _profile = 1.0f;
         _common = (float)cruisePWM;
-        _headingCorr = 0.0f;
+        if (_mode == BurstHold) holdHeading(dt); else _headingCorr = 0.0f;
         return;
       }
 
@@ -294,41 +299,7 @@ class WheelRegulator {
 
       // ---- Heading hold (BNO08x) -----------------------------------------
       if (_mode == Hold) {
-        float raw = headingErrorDeg;
-
-        // A jump this large between two ticks is not the robot turning: the
-        // sensor was re-referenced (reset, or a stale read returning). Start
-        // the derivative and integral again from here instead of reacting.
-        float jump = raw - _lastHeadingErr;
-        if (jump > 30.0f || jump < -30.0f) {
-          _lastHeadingErr = raw;
-          _headingD = 0.0f;
-          _headingI = 0.0f;
-        }
-
-        // Only P sees the deadband; I and D see the raw error.
-        float eP = (raw < headingDeadbandDeg && raw > -headingDeadbandDeg)
-                 ? 0.0f : raw;
-
-        float rate = (raw - _lastHeadingErr) / dt;
-        _headingD = 0.7f * _headingD + 0.3f * rate;
-        _lastHeadingErr = raw;
-
-        float pd = kHeadingP * eP + kHeadingD * _headingD;
-        bool saturated = (pd > (float)maxHeadingCorrection) ||
-                         (pd < -(float)maxHeadingCorrection);
-
-        // Integral frozen while the output is at its limit (anti-windup).
-        if (!saturated) {
-          _headingI += kHeadingI * raw * dt;
-          if (_headingI >  headingIntegralLimit) _headingI =  headingIntegralLimit;
-          if (_headingI < -headingIntegralLimit) _headingI = -headingIntegralLimit;
-        }
-
-        float c = pd + _headingI;
-        if (c >  (float)maxHeadingCorrection) c =  (float)maxHeadingCorrection;
-        if (c < -(float)maxHeadingCorrection) c = -(float)maxHeadingCorrection;
-        _headingCorr = c;
+        holdHeading(dt);
       } else {
         _headingCorr = 0.0f;
         _headingI = 0.0f;
@@ -398,6 +369,45 @@ class WheelRegulator {
 
     bool _first = true;
     unsigned long _lastUpdate = 0;
+
+    // The heading PID: runs the error fed in this tick into _headingCorr.
+    void holdHeading(float dt) {
+      float raw = headingErrorDeg;
+
+      // A jump this large between two ticks is not the robot turning: the
+      // sensor was re-referenced (reset, or a stale read returning). Start
+      // the derivative and integral again from here instead of reacting.
+      float jump = raw - _lastHeadingErr;
+      if (jump > 30.0f || jump < -30.0f) {
+        _lastHeadingErr = raw;
+        _headingD = 0.0f;
+        _headingI = 0.0f;
+      }
+
+      // Only P sees the deadband; I and D see the raw error.
+      float eP = (raw < headingDeadbandDeg && raw > -headingDeadbandDeg)
+               ? 0.0f : raw;
+
+      float rate = (raw - _lastHeadingErr) / dt;
+      _headingD = 0.7f * _headingD + 0.3f * rate;
+      _lastHeadingErr = raw;
+
+      float pd = kHeadingP * eP + kHeadingD * _headingD;
+      bool saturated = (pd > (float)maxHeadingCorrection) ||
+                       (pd < -(float)maxHeadingCorrection);
+
+      // Integral frozen while the output is at its limit (anti-windup).
+      if (!saturated) {
+        _headingI += kHeadingI * raw * dt;
+        if (_headingI >  headingIntegralLimit) _headingI =  headingIntegralLimit;
+        if (_headingI < -headingIntegralLimit) _headingI = -headingIntegralLimit;
+      }
+
+      float c = pd + _headingI;
+      if (c >  (float)maxHeadingCorrection) c =  (float)maxHeadingCorrection;
+      if (c < -(float)maxHeadingCorrection) c = -(float)maxHeadingCorrection;
+      _headingCorr = c;
+    }
 
     // Zero slope at both ends, so there is no jolt where ramp meets cruise.
     static float smoothstep(float t) {

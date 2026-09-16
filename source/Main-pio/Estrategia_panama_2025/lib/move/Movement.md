@@ -176,7 +176,7 @@ microswitch advanced `state`), the next call re-arms from the current counts.
 | `forward`, `backward`, `left`, `right` | Hold | yes | front encoder ≥ target, or timeout |
 | `forwardRegulated` | Hold | yes | returns 1 at target, 2 at 14/22 of it |
 | `forwardp`, `backwardp`, `forwardq` | Hold, leaning `wallHugDeg` toward the wall | yes | as above (`forwardp` also returns 2 at 14/22) |
-| `forwardLeft`, `forwardRight`, `backwardLeft`, `backwardRight` | Profile | no | front encoder ≥ target, or timeout |
+| `forwardLeft`, `forwardRight`, `backwardLeft`, `backwardRight` | BurstHold | yes | front encoder ≥ target, or timeout |
 | `rotate` | Profile | no | front encoder ≥ target, or timeout |
 | `rotateCW`, `rotateCCW` | none | no | open-loop at a fixed PWM; the caller stops it |
 | `stop` | – | – | brakes all four motors and holds them |
@@ -222,7 +222,8 @@ public members, set in `initHardware()` (`src/Hardware.cpp`).
 | Mode | Speed profile | Heading PID | Used by |
 |---|---|---|---|
 | Burst | no — straight to `cruisePWM`, brake at the target | no | any move shorter than 30 mm (wall nudges) |
-| Profile | yes | no | diagonals, rotations |
+| BurstHold | no — straight to `cruisePWM`, brake at the target | yes | the diagonals, whatever their length |
+| Profile | yes | no | rotations |
 | Hold | yes | yes | forward / backward / left / right / forwardRegulated, and the wall-hugging straights with a `wallHugDeg` lean |
 
 ### Speed profile (encoders)
