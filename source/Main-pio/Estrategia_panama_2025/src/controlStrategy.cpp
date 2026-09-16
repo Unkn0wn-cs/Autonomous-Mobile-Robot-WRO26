@@ -27,7 +27,7 @@ enum RoutineId {
   DebugRoutine      = 10,
   OrangeCollection  = 11,
   LaneSweep         = 12,
-  OuterCornerCheck  = 13
+  CollectionCornerCheck = 13
 };
 
 int routine = MainLoop;
@@ -35,7 +35,7 @@ int state   = 0;
 bool first = false;
 rlane lane = OUTER;
 int connections = 0;
-int pesos[NUM_FRANJAS] = {0};
+int laneWeights[NUM_FRANJAS] = {0};
 bool lastRoutine = false;
 bool midRoutine = false;
 bool midRoutineDone = false;
@@ -53,16 +53,19 @@ static const unsigned long OrangeEjectMs = 2000;
 static const unsigned long EarlyGameMs = 45000;
 
 static bool EarlyGameExpired = false;
+static rlane CollectionLane = OUTER;
+static bool FinalShotPending = false;
 static int RoutineAfterSweep = OrangeCollection;
+static int StateAfterSweep = 9;
 
-// Rotor modes used only by the control strategy.
-static void enableControlSlowDrivers() {
+// Low shot: normal direction. Ejection: reverse, along the floor.
+static void enableControlSlowShot() {
   digitalWrite(input3, HIGH);
   digitalWrite(input4, LOW);
   analogWrite(enable34, RotorMinPwm);
 }
 
-static void enableControlReverseDrivers() {
+static void enableControlEjection() {
   digitalWrite(input3, LOW);
   digitalWrite(input4, HIGH);
   analogWrite(enable34, RotorReversePwm);
@@ -85,11 +88,12 @@ int classifyLane(float X, float Y, bool RightRobot) {
 }
 
 static void BeginNormalLoop() {
-  lane = OUTER;
+  lane = CollectionLane;
   first = false;
-  enableControlSlowDrivers();
+  FinalShotPending = true;
+  enableControlSlowShot();
   routine = MainLoop;
-  state = -1;
+  state = lane == OUTER ? -1 : -7;
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +260,11 @@ static int DetectBallZone() {
 // ---------------------------------------------------------------------------
 
 void selectOpeningRoutine() {
+  startTime = millis(); // Start the 45 s clock before detection.
   int BallZone = DetectBallZone();
+  state = 0;
+  CollectionLane = (BallZone == OpeningUpperRight || BallZone == OpeningLowerRight)
+                     ? INNER : OUTER;
 
   // --- Bluetooth flag so we know which case was entered ---
   if (BallZone >= 0) {
@@ -305,7 +313,7 @@ void handleMicroSwitches() {
 }
 
 // ---------------------------------------------------------------------------
-// updateEndgameTiming  (stub - will gate the 45 s transition)
+// Mark 45 s; finish the current route and return before the final shot.
 // ---------------------------------------------------------------------------
 
 void updateEndgameTiming() {
@@ -321,16 +329,142 @@ void updateEndgameTiming() {
 
 void runRoutines() {
   switch (routine) {
-    // Purple openings stay safe until their own routines are added.
-    case OpeningUpperLeft:
-    case OpeningUpperRight:
-    case OpeningLowerLeft:
-    case OpeningLowerRight:
-      move.stop();
-      enableControlSlowDrivers();
+    case OpeningUpperLeft: // MIDDLE capture, OUTER collection.
+      switch (state) {
+        case 0: if (move.backward(100)) state++; break;
+        case 1: // Standard shot for the orange before the purple.
+          myservo.write(closedGate);
+          enableControlSlowShot();
+          enableDrivers();
+          if (move.stopForMillis(mili)) state++;
+          break;
+        case 2: if (move.forward(505)) state++; break;
+        case 3: // Let the orange leave before opening the gate.
+          if (move.stopForMillis(3000)) state++;
+          break;
+        case 4: // Capture purple + clearance; tune this distance.
+          myservo.write(openGate);
+          enableDrivers();
+          if (move.forward(350)) state++;
+          break;
+        case 5: // Store purple; immediately slow the rotor.
+          myservo.write(closedGate);
+          enableControlSlowShot();
+          if (move.stopForMillis(mili)) state++;
+          break;
+        case 6: // Remaining MIDDLE route to the front.
+          if (move.forward(295)) state++;
+          break;
+        case 7: // Eject towards OUTER, then sweep INNER.
+          lane = MIDDLE;
+          RoutineAfterSweep = OrangeCollection;
+          StateAfterSweep = 8;
+          routine = LaneSweep;
+          state = 2;
+          break;
+      }
       break;
 
-    // No-purple opening, then the first mandatory INNER sweep.
+    case OpeningUpperRight: // INNER capture and collection.
+      switch (state) {
+        case 0: if (move.right(200)) state++; break;
+        case 1: if (move.backward(100)) state++; break;
+        case 2: // Low shot sends the first orange towards INNER.
+          myservo.write(closedGate);
+          enableControlSlowShot();
+          if (move.stopForMillis(mili)) state++;
+          break;
+        case 3: if (move.forward(530)) state++; break;
+        case 4: // Low-speed transit time; tune 3000 ms here.
+          if (move.stopForMillis(3000)) state++;
+          break;
+        case 5: // Capture purple + clearance; tune this distance.
+          myservo.write(openGate);
+          enableDrivers();
+          if (move.forward(350)) state++;
+          break;
+        case 6: // Store purple; immediately slow the rotor.
+          myservo.write(closedGate);
+          enableControlSlowShot();
+          if (move.stopForMillis(mili)) state++;
+          break;
+        case 7: // Remaining INNER route to the front.
+          if (move.forward(270)) state++;
+          break;
+        case 8: // Eject towards INNER, then sweep MIDDLE.
+          lane = INNER;
+          RoutineAfterSweep = OrangeCollection;
+          StateAfterSweep = 8;
+          routine = LaneSweep;
+          state = 2;
+          break;
+      }
+      break;
+
+    case OpeningLowerLeft: // Purple first on MIDDLE.
+      switch (state) {
+        case 0: if (move.backward(100)) state++; break;
+        case 1: // Open for capture at full rotor power.
+          myservo.write(openGate);
+          enableControlSlowShot();
+          enableDrivers();
+          if (move.stopForMillis(mili)) state++;
+          break;
+        case 2: // Capture purple + clearance; tune this distance.
+          if (move.forward(550)) state++;
+          break;
+        case 3: // Store purple; immediately slow the rotor.
+          myservo.write(closedGate);
+          enableControlSlowShot();
+          if (move.stopForMillis(mili)) state++;
+          break;
+        case 4: // Collect the next orange at minimum power.
+          if (move.forward(250)) state++;
+          break;
+        case 5: if (move.forward(350)) state++; break;
+        case 6: // Eject towards OUTER, then sweep INNER.
+          lane = MIDDLE;
+          RoutineAfterSweep = OrangeCollection;
+          StateAfterSweep = 8;
+          routine = LaneSweep;
+          state = 2;
+          break;
+      }
+      break;
+
+    case OpeningLowerRight: // Purple first on INNER.
+      switch (state) {
+        case 0: if (move.right(200)) state++; break;
+        case 1: if (move.backward(100)) state++; break;
+        case 2: // Open for capture at full rotor power.
+          myservo.write(openGate);
+          enableControlSlowShot();
+          enableDrivers();
+          if (move.stopForMillis(mili)) state++;
+          break;
+        case 3: // Capture purple + clearance; tune this distance.
+          if (move.forward(550)) state++;
+          break;
+        case 4: // Store purple; immediately slow the rotor.
+          myservo.write(closedGate);
+          enableControlSlowShot();
+          if (move.stopForMillis(mili)) state++;
+          break;
+        case 5: // Collect the next orange at minimum power.
+          if (move.forward(250)) state++;
+          break;
+        case 6: if (move.forward(350)) state++; break;
+        case 7: // Eject towards INNER, then sweep MIDDLE.
+          lane = INNER;
+          RoutineAfterSweep = OrangeCollection;
+          StateAfterSweep = 8;
+          routine = LaneSweep;
+          state = 2;
+          break;
+      }
+      break;
+
+    // No-purple opening, then collection shared by all five cases.
     case OrangeCollection:
       switch (state) {
         case 0:
@@ -340,7 +474,7 @@ void runRoutines() {
           break;
         case 1:
           myservo.write(closedGate);
-          enableControlSlowDrivers();
+          enableControlSlowShot();
           if (move.stopForMillis(mili)) state++;
           break;
         case 2:
@@ -354,11 +488,11 @@ void runRoutines() {
           if (move.stopForMillis(GateCloseMs)) state++;
           break;
         case 5:
-          enableControlReverseDrivers();
+          enableControlEjection();
           if (move.stopForMillis(OrangeEjectMs)) state++;
           break;
         case 6:
-          enableControlSlowDrivers();
+          enableControlSlowShot();
           if (move.backward(lenght + 250)) {
             headingZero(); state++;
           }
@@ -366,16 +500,18 @@ void runRoutines() {
         case 7:
           if (move.left(180)) state++;
           break;
-        case 8:
-          lane = INNER;
+        case 8: // Sweep the other row of initial oranges.
+          if (EarlyGameExpired) { BeginNormalLoop(); break; }
+          lane = CollectionLane == OUTER ? INNER : MIDDLE;
           RoutineAfterSweep = OrangeCollection;
+          StateAfterSweep = 9;
           routine = LaneSweep;
           state = 0;
           break;
-        case 9: // Safe corner: scan only MIDDLE and INNER.
+        case 9: // Rear OUTER reference: ignore the collection lane.
           if (EarlyGameExpired) { BeginNormalLoop(); break; }
-          pesos[0] = pesos[1] = pesos[2] = 0;
-          enableControlSlowDrivers();
+          laneWeights[0] = laneWeights[1] = laneWeights[2] = 0;
+          enableControlSlowShot();
           state++;
           break;
         case 10:
@@ -383,13 +519,18 @@ void runRoutines() {
           for (int I = 0; I < pixy.ccc.numBlocks; I++) {
             Block &Blk = pixy.ccc.blocks[I];
             if ((int)Blk.m_signature != orangeSignature) continue;
-            int Franja = constrain(classifyLane(Blk.m_x, Blk.m_y, false), 0, NUM_FRANJAS - 1);
-            if (Franja == 1 || Franja == 2)
-              pesos[Franja] += (int)Blk.m_width * (int)Blk.m_height;
+            int laneIndex = constrain(classifyLane(Blk.m_x, Blk.m_y, false), 0, NUM_FRANJAS - 1);
+            if (laneIndex != CollectionLane)
+              laneWeights[laneIndex] += (int)Blk.m_width * (int)Blk.m_height;
           }
           if (move.stopForMillis(mili / 2)) {
-            lane = (pesos[2] > pesos[1]) ? INNER : MIDDLE;
-            RoutineAfterSweep = OuterCornerCheck;
+            if (EarlyGameExpired) { BeginNormalLoop(); break; }
+            if (CollectionLane == OUTER)
+              lane = (laneWeights[2] > laneWeights[1]) ? INNER : MIDDLE;
+            else
+              lane = (laneWeights[0] > laneWeights[1]) ? OUTER : MIDDLE;
+            RoutineAfterSweep = CollectionCornerCheck;
+            StateAfterSweep = 0;
             routine = LaneSweep;
             state = 0;
           }
@@ -397,33 +538,36 @@ void runRoutines() {
       }
       break;
 
-    // Reusable full forward/backward sweep.  It always starts and ends at
-    // the rear OUTER corner, which keeps competition tuning local to constants.
+    // Full sweep; rear OUTER is the reference for the camera and side switch.
     case LaneSweep:
       switch (state) {
         case 0:
           if (lane == INNER) {
             if (move.right(360)) state++;
-          } else {
+          } else if (lane == MIDDLE) {
             if (move.right(180)) state++;
-          }
+          } else state++;
           break;
         case 1:
-          enableControlSlowDrivers();
+          enableControlSlowShot();
           if (move.forwardRegulated(lenght + 50) == 1) state++;
           break;
         case 2: disableDrivers(); if (move.stopForMillis(mili)) state++; break;
-        case 3: if (move.rotate(166, true)) state++; break;
+        case 3: // Face the collection corner: OUTER left, INNER right.
+          if (move.rotate(166, CollectionLane == OUTER)) state++;
+          break;
         case 4: myservo.write(closedGate); if (move.stopForMillis(GateCloseMs)) state++; break;
         case 5:
-          enableControlReverseDrivers();
+          enableControlEjection();
           if (move.stopForMillis(OrangeEjectMs)) state++;
           break;
         case 6:
-          enableControlSlowDrivers();
+          enableControlSlowShot();
           state++;
           break;
-        case 7: if (move.rotate(166, false)) state++; break;
+        case 7: // Restore the forward heading.
+          if (move.rotate(166, CollectionLane == INNER)) state++;
+          break;
         case 8:
           if (move.backward(lenght + 50)) {
             headingZero(); state++;
@@ -432,9 +576,9 @@ void runRoutines() {
         case 9:
           if (lane == INNER) {
             if (move.left(360)) state++;
-          } else {
+          } else if (lane == MIDDLE) {
             if (move.left(180)) state++;
-          }
+          } else state++;
           break;
         case 10:
           if (move.backward(100)) {
@@ -446,36 +590,48 @@ void runRoutines() {
           break;
         case 12:
           routine = RoutineAfterSweep;
-          state = RoutineAfterSweep == OrangeCollection ? 9 : 0;
+          state = StateAfterSweep;
           break;
       }
       break;
 
-    case OuterCornerCheck:
+    case CollectionCornerCheck:
       switch (state) {
-        case 0:
+        case 0: // Decide at the rear reference, before moving.
           if (EarlyGameExpired) { BeginNormalLoop(); break; }
-          enableControlSlowDrivers();
+          enableControlSlowShot();
+          state++;
+          break;
+        case 1: // Reach the selected collection lane.
+          if (CollectionLane == INNER) {
+            if (move.right(360)) state++;
+          } else state++;
+          break;
+        case 2: // Short corner check; tune 550 mm here.
           if (move.forward(550)) state++;
           break;
-        case 1: myservo.write(closedGate); if (move.stopForMillis(GateCloseMs)) state++; break;
-        case 2:
-          enableControlReverseDrivers();
+        case 3: myservo.write(closedGate); if (move.stopForMillis(GateCloseMs)) state++; break;
+        case 4:
+          enableControlEjection();
           if (move.stopForMillis(OrangeEjectMs)) state++;
           break;
-        case 3:
-          enableControlSlowDrivers();
+        case 5:
+          enableControlSlowShot();
           if (move.backward(550)) state++;
           break;
-        case 4:
+        case 6:
           if (move.backward(100)) {
             headingZero(); state++;
           }
           break;
-        case 5:
-          if (move.left(180)) state++;
+        case 7: // Reset against the left wall, also after an INNER check.
+          if (CollectionLane == INNER) {
+            if (move.left(540)) state++;
+          } else {
+            if (move.left(180)) state++;
+          }
           break;
-        case 6: routine = OrangeCollection; state = 9; break;
+        case 8: routine = OrangeCollection; state = 9; break;
       }
       break;
 
@@ -483,6 +639,9 @@ void runRoutines() {
     // outer-wall pass, then calls the same camera-return routine.
     case MainLoop:
       switch (state) {
+        case -7: // Final shot on INNER, starting from the rear OUTER reference.
+          if (move.right(360)) state = 0;
+          break;
         case -1: disableDrivers(); if (move.rotate(166, true)) state--; break;
         case -2: if (move.outer(95)) state--; break;
         case -3: if (move.forwardp(400, false)) state--; break;
@@ -494,13 +653,17 @@ void runRoutines() {
         case 2: {
           int Result = lane == OUTER ? move.forwardp(lenght + 50, false)
                                      : move.forwardRegulated(lenght + 50);
-          if (Result == 2) enableControlSlowDrivers();
+          // Keep standard power through the accumulated corner at 45 s.
+          if (Result == 2 && !FinalShotPending) enableSlowDrivers();
           if (Result == 1) state++;
           break;
         }
-        case 3: if (move.stopForMillis(mili)) state++; break;
+        case 3:
+          if (move.stopForMillis(FinalShotPending ? 3000 : mili)) state++;
+          break;
         case 4: if (move.stopForMillis(mili)) state++; break;
         case 5:
+          FinalShotPending = false;
           enableDrivers();
           if (lane == OUTER) lane = MIDDLE;
           else if (lane == MIDDLE) lane = INNER;
@@ -525,17 +688,17 @@ void runRoutines() {
           for (int I = 0; I < pixy.ccc.numBlocks; I++) {
             Block &Blk = pixy.ccc.blocks[I];
             if ((int)Blk.m_signature == orangeSignature) {
-              int Franja = constrain(classifyLane(Blk.m_x, Blk.m_y, false), 0, NUM_FRANJAS - 1);
-              pesos[Franja] += (int)Blk.m_width * (int)Blk.m_height;
+              int laneIndex = constrain(classifyLane(Blk.m_x, Blk.m_y, false), 0, NUM_FRANJAS - 1);
+              laneWeights[laneIndex] += (int)Blk.m_width * (int)Blk.m_height;
             }
           }
           if (move.stopForMillis(mili / 2)) state++;
           break;
         case 7: {
           int Best = 0;
-          for (int I = 1; I < NUM_FRANJAS; I++) if (pesos[I] > pesos[Best]) Best = I;
+          for (int I = 1; I < NUM_FRANJAS; I++) if (laneWeights[I] > laneWeights[Best]) Best = I;
           lane = Best == 0 ? OUTER : (Best == 1 ? MIDDLE : INNER);
-          pesos[0] = pesos[1] = pesos[2] = 0;
+          laneWeights[0] = laneWeights[1] = laneWeights[2] = 0;
           routine = MainLoop;
           state = lane == OUTER ? -1 : 0;
           break;
