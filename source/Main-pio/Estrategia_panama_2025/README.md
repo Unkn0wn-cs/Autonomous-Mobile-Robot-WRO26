@@ -148,8 +148,8 @@ to be open at the moment the robot passes over where the ball was seen:
 
 | Routine | Purple seen | Gate schedule |
 |---|---|---|
-| 0 | upper-left | closed → forward 505 → **open** → forward 350 → closed |
-| 1 | upper-right | closed → forward 530 → **open** → forward 350 → closed |
+| 0 | upper-left | closed → forward 430 → pause → **open** → forward 430 → closed |
+| 1 | upper-right | strafe right 250, then the same as routine 0 |
 | 2 | lower-left | **open** → forward 550 → closed → forward 250 |
 | 3 | lower-right | **open** → forward 550 → closed → forward 250 |
 
@@ -208,26 +208,26 @@ during straights and strafes, and drives the recovery turn below.
 
 ### Heading recovery (routine 8)
 
-Every pass of `runRoutines()` compares the heading since power-on with where
-the current step should be pointing: 0° up the field, or a quarter turn
-towards the outer wall on the corner legs (routine 4 states −2..−4, routine 7
-states 5..11). The reference is the power-on heading — the robot is switched on
-square in its start box — not the back-wall zero, because a robot that reaches
-the wall skewed captures a skewed zero. The check is skipped while a turn is
-running and while the sensor is stale.
+In every step where the robot must point north (up the field), `runRoutines()`
+checks the heading against the mat's north: the heading captured by the last
+back-wall squaring (`headingZero()` on the back switch, and at power-on). The
+corner legs — routine 4 states −5..−1 and routine 7 states 4..12, where the
+robot is deliberately turned — are not checked. A stale sensor reads 0, so it
+never triggers without a reading.
 
-`GENERAL_HEADING_LOST_DEG` (45°) or more off and routine 8 takes over, whatever
-the robot was doing: stop, rotor off, then turn open-loop at
-`GENERAL_HEADING_TURN_PWM` (200) while watching the sensor until the heading is
-within `GENERAL_HEADING_DONE_DEG` (8°) of the power-on heading, then run the
-return (routine 6): reverse to the back wall, read the camera, pick the next
-lane. The three constants are in [`src/Strategy.h`](src/Strategy.h). A robot
-that cannot get square keeps re-entering routine 8 from routine 6; there is no
-give-up.
+`headingLostDeg` (70°) or more off north and routine 8 takes over, whatever the
+robot was doing: stop, rotor off, then turn open-loop at `headingTurnPWM` (230)
+while watching the sensor until within `headingSquareDeg` (8°) of north, then
+run the return (routine 6): reverse to the back wall — which squares the robot
+and re-captures north on the switch — read the camera, pick the next lane. The
+spin is capped at the 4 s move timeout like every other move; after it the
+return runs regardless and the check runs again on the next straight. The three
+numbers are in the robot's block in [`src/Hardware.cpp`](src/Hardware.cpp).
 
 Routine 5 is the diagonal lane: strafe in, reverse, forward, then a genuine
 diagonal (`forwardLeft` / `forwardRight`, which drives only two of the four
-wheels), then a long `forwardq`.
+wheels at full power to the count, with no ramp or deceleration), then a long
+`forwardq`.
 
 ### What the rotor and gate are doing
 

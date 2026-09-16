@@ -64,10 +64,11 @@ extern Encoders encoderRearLeft;   // A9,  A8   motor2, rear left   - speed only
 //   TARGET  captured at the start of every straight or strafe by move.h, so the
 //           regulator can hold the heading that move began on.
 //   ZERO    set when the back microswitch confirms the robot is square against
-//           a wall; headingSinceZero() is the heading relative to that wall.
-//   BOOT    the heading at power-on, i.e. the robot square in its start box.
-//           The telemetry line shows it; the general strategy's heading
-//           watchdog (routine 8) measures against it.
+//           the back wall, and at power-on; headingSinceZero() is the heading
+//           relative to that wall - the mat's north. The general strategy's
+//           heading recovery (routine 8) measures against it.
+//   BOOT    the heading at power-on. Only the telemetry line reads it, to show
+//           how far the robot has turned since it was switched on.
 //
 // FAIL-SAFES:
 //   * no report for 100 ms  -> headingError() returns 0 (heading hold idles)
@@ -106,7 +107,7 @@ float headingError();          // degrees from target, -180..+180, 0 when stale
 void  headingZero();
 float headingSinceZero();      // degrees from zero, -180..+180
 
-// Mat reference: the heading at power-on.
+// Telemetry reference: the heading at power-on.
 float headingSinceBoot();      // degrees from boot, -180..+180, 0 when stale
 
 // ---------------------------------------------------------------------------

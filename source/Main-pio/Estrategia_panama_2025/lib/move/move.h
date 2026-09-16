@@ -254,32 +254,33 @@ class Move {
     }
 
     // ---- Diagonals -------------------------------------------------------
-    // Two wheels drive, two are released. Profile mode, no heading hold.
+    // Two wheels drive, two are released. Burst mode: full power to the
+    // target, no profile and no heading hold, braked at the count.
 
     bool forwardLeft(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_FORWARD_LEFT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_FORWARD_LEFT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(RELEASE, FORWARD, RELEASE, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     bool forwardRight(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_FORWARD_RIGHT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_FORWARD_RIGHT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(FORWARD, RELEASE, FORWARD, RELEASE);
       return checkDoneWithTimeout(pulses);
     }
 
     bool backwardLeft(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_BACKWARD_LEFT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_BACKWARD_LEFT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(BACKWARD, RELEASE, BACKWARD, RELEASE);
       return checkDoneWithTimeout(pulses);
     }
 
     bool backwardRight(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_BACKWARD_RIGHT, WheelRegulator::Profile, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_BACKWARD_RIGHT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(RELEASE, BACKWARD, RELEASE, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }

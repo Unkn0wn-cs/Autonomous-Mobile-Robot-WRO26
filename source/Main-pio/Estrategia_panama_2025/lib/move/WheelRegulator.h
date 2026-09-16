@@ -17,10 +17,10 @@
 //   pwm_i = common + trim_i + differential * ROT_i * dirSign_i
 //
 //   common        the speed profile: an open-loop ramp from rampStartPWM to
-//                 cruisePWM while accelerating (the wheels need ~200 to break
-//                 free), cruisePWM, then a closed-loop deceleration to a creep
-//                 at the target (or, for a move that meets a wall before its
-//                 target, to an approach speed held over the last part)
+//                 cruisePWM while accelerating, cruisePWM, then a closed-loop
+//                 deceleration to a creep at the target (or, for a move that
+//                 meets a wall before its target, to an approach speed held
+//                 over the last part), never below minPWM
 //   trim_i        this wheel's static offset from the mean of pwmf[]/pwms[]
 //   differential  the heading PID output, +-maxHeadingCorrection
 //   ROT           {+1, -1, -1, +1}: wheels 1 and 4 against 2 and 3, i.e. the
@@ -28,8 +28,11 @@
 //   dirSign_i     +1 forward, -1 backward, 0 released, so the same
 //                 differential turns the robot the same way whatever the move
 //
-// The differential is never clipped: if a wheel would exceed maxPWM the whole
-// set is shifted down instead, so a correction always arrives in full.
+// If a wheel would exceed maxPWM the whole set is shifted down instead of
+// clipping the differential. If a driven wheel would then fall below minPWM
+// it is held at minPWM: a wheel commanded below what it needs to turn gives
+// no correction, only a stall. The deceleration loop is bounded by minPWM the
+// same way.
 //
 // This class does not decide when a move is finished - move.h does that from
 // the front encoders and brakes at the target.
@@ -44,12 +47,12 @@ class WheelRegulator {
 
     // How much control a move asks for.
     enum Mode {
-      // Very short nudges, usually finishing against a wall. Straight to cruise
-      // PWM, no profile and no correction: the wall does the aligning.
+      // Very short nudges, usually finishing against a wall, and the diagonals
+      // whatever their length. Straight to cruise PWM, no profile and no
+      // correction: the wall does the aligning, or two wheels get everything.
       Burst,
       // Speed profile only, no heading hold. Wall-hugging straights (the wall
-      // aligns them), diagonals, and rotations (a turn is meant to change the
-      // heading).
+      // aligns them) and rotations (a turn is meant to change the heading).
       Profile,
       // Speed profile and heading hold. Every free translation.
       Hold
@@ -62,6 +65,7 @@ class WheelRegulator {
 
     // ---- PWM levels ---------------------------------------------------------
     int maxPWM       = 248;
+    int minPWM       = 0;     // floor for every driven wheel and for the decel loop
     int rampStartPWM = 205;   // where the accel ramp starts: just above breakaway
     int cruisePWM    = 232;   // open-loop cruise
 
@@ -273,17 +277,17 @@ class WheelRegulator {
         float e = (_vCmd - _speed) / countsPerMM;        // mm/s
         float u = kSpeedP * e + _speedI;
         bool satHi = u >= (float)maxPWM;
-        bool satLo = u <= 0.0f;
+        bool satLo = u <= (float)minPWM;
         if (!(satHi && e > 0.0f) && !(satLo && e < 0.0f)) {
           _speedI += kSpeedI * e * dt;
         }
         if (_speed < 0.5f * _vEnd) _speedI += (float)stallEscapePWM;
         if (_speedI > (float)maxPWM) _speedI = (float)maxPWM;
-        if (_speedI < 0.0f)          _speedI = 0.0f;
+        if (_speedI < (float)minPWM) _speedI = (float)minPWM;
 
         u = kSpeedP * e + _speedI;
         if (u > (float)maxPWM) u = (float)maxPWM;
-        if (u < 0.0f)          u = 0.0f;
+        if (u < (float)minPWM) u = (float)minPWM;
         _common  = u;
         _profile = (_vPeak > 0.0f) ? (_vCmd / _vPeak) : 0.0f;
       }
@@ -334,7 +338,9 @@ class WheelRegulator {
     // The four wheel PWMs for this instant, given each wheel's trim (its
     // offset from the mean of pwmf[]/pwms[]). The heading differential is
     // applied in full: if the highest wheel would exceed maxPWM, all four are
-    // shifted down by the excess instead of clipping it.
+    // shifted down by the excess instead of clipping it. A driven wheel is
+    // then held at minPWM or above; a released wheel's PWM is not a drive
+    // level and is left alone.
     void computePWM(const int trim[WHEEL_COUNT], int out[WHEEL_COUNT]) const {
       static const int8_t ROT[WHEEL_COUNT] = {1, -1, -1, 1};
       float u[WHEEL_COUNT];
@@ -350,6 +356,7 @@ class WheelRegulator {
         int pwm = (int)(u[i] - shift + 0.5f);
         if (pwm > maxPWM) pwm = maxPWM;
         if (pwm < 0)      pwm = 0;
+        if (_dirSign[i] != 0 && pwm < minPWM) pwm = minPWM;
         out[i] = pwm;
       }
     }

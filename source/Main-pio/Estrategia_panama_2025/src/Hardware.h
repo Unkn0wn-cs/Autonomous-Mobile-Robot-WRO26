@@ -129,6 +129,14 @@ const int diameter = 60;  // wheel diameter in mm; with `pulses` gives counts/mm
 extern const int normalCruisePWM;   // every routine
 extern const int captureCruisePWM;  // the purple-ball captures, routines 0-3.
 
+// Heading recovery (routine 8 in the general strategy): how far off north the
+// robot may point before it stops and turns back, how close it must get, and
+// the PWM of that open-loop turn. North is the heading of the last back-wall
+// squaring (headingSinceZero() in Sensors.h).
+extern const int headingLostDeg;
+extern const int headingSquareDeg;
+extern const int headingTurnPWM;
+
 
 // ---------------------------------------------------------------------------
 // Drivetrain: four 45-degree omni wheels on the Adafruit Motor Shield v1.

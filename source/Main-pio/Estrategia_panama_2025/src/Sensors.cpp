@@ -2,7 +2,6 @@
 // the telemetry. See Sensors.h.
 
 #include "Sensors.h"
-
 #include <stdio.h>
 #include <Adafruit_BNO08x.h>
 

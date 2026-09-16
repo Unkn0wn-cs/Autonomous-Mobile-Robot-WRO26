@@ -17,11 +17,17 @@
 // ===========================================================================
 // LEFT - WALL
 // ===========================================================================
-  // int pwmf[4] = {245, 243, 243, 245};
-  // int pwms[4] = {220, 225, 220, 225};
-  // extern const long pulses = 900;  // encoder counts per wheel revolution
+  // int pwmf[4] = {255, 255, 255, 255};
+  // int pwms[4] = {255, 255, 255, 255};
+  // extern const long pulses = 800;  // encoder counts per wheel revolution
   // side robotSide = LEFT;
   // int slowRotorSpeed = 90;
+  // int fastRotorSpeed = 200;
+  // const int normalCruisePWM  = 255;  // every routine
+  // const int captureCruisePWM = 240;
+  // const int headingLostDeg   = 70;   // off north by this -> routine 8
+  // const int headingSquareDeg = 8;    // routine 8 stops turning inside this
+  // const int headingTurnPWM   = 230;  // routine 8's open-loop turn
   // int closedGate = 180;
   // int openGate = 55;
   // int lenght = 1100;
@@ -40,8 +46,13 @@
   int pwms[4] = {200, 200, 200, 200};
   extern const long pulses = 1350;  // encoder counts per wheel revolution
   side robotSide = RIGHT;
-  int slowRotorSpeed = 140;
+  int slowRotorSpeed = 120;
   int fastRotorSpeed = 200;
+  const int normalCruisePWM  = 230;  // every routine
+  const int captureCruisePWM = 190;
+  const int headingLostDeg   = 70;   // off north by this -> routine 8
+  const int headingSquareDeg = 8;    // routine 8 stops turning inside this
+  const int headingTurnPWM   = 230;  // routine 8's open-loop turn
   int closedGate =116;
   int openGate = 0;
   int lenght = 640;
@@ -56,15 +67,6 @@
 // ===========================================================================
 // Everything below is the same on both robots.
 // ===========================================================================
-
-// ---------------------------------------------------------------------------
-// Cruise levels, identical on both robots. The regulator drives every wheel
-// at the cruise plus that wheel's trim from pwmf[]/pwms[]; the rest of the
-// movement calibration is in initHardware().
-// ---------------------------------------------------------------------------
-
-const int normalCruisePWM  = 232;  // every routine
-const int captureCruisePWM = 180;  // the purple-ball captures, routines 0-3.
 
 // ---------------------------------------------------------------------------
 // Motors, on the Adafruit Motor Shield v1.
@@ -139,25 +141,30 @@ void initHardware() {
   // =========================================================================
 
   // ---- PWM levels ---------------------------------------------------------
-  // The wheels break free at ~180 PWM, so the accel ramp starts just above
-  // that. Cruise sits below maxPWM so the heading differential has room before
-  // the regulator has to shift the whole set down.
-  move.regulator.maxPWM       = 248;
-  move.regulator.rampStartPWM = 185;
+  // The wheels need ~200 PWM to break free, so minPWM holds every driven
+  // wheel at or above that: the deceleration loop cannot go below it and a
+  // heading correction that would push one pair under it is clipped there.
+  // Cruise is at maxPWM, so a correction shifts the slow pair down rather
+  // than the fast pair up; rampStartPWM at maxPWM starts every move at full
+  // power.
+  move.regulator.maxPWM       = 255;
+  move.regulator.minPWM       = 220;
+  move.regulator.rampStartPWM = 220;
   move.regulator.cruisePWM    = normalCruisePWM;
 
   // ---- Wall-hug trims -----------------------------------------------------
   // PWM one diagonal pair is pushed up or down in forwardp / backwardp /
   // forwardq so the robot presses against the wall it runs along.
-  move.forwardpTrim  = 9;
-  move.backwardpTrim = 6;
-  move.forwardqTrim  = 9;
+  move.forwardpTrim  = 7;
+  move.backwardpTrim = 0;
+  move.forwardqTrim  = 5;
 
   // ---- Speed profile: shape -----------------------------------------------
   // Lengths in mm because the two robots count very differently per
   // millimetre.
   //   burst  moves shorter than this run straight at cruise with no ramp,
-  //          no deceleration and no correction - wall nudges
+  //          no deceleration and no correction - wall nudges. The diagonals
+  //          run this way whatever their length.
   //   ramp   the open-loop accel ramp, rampFraction of the move clamped to
   //          min..max
   //   decel  the closed-loop deceleration, decelFraction of the move clamped
@@ -173,7 +180,8 @@ void initHardware() {
   // ---- Speed profile: the deceleration loop -------------------------------
   // A PI on the mean encoder speed brings the robot from the speed it had
   // when the decel began down to a creep at the target: endSpeedFraction of
-  // that speed, never below minEndSpeedMMs. stallEscapePWM is added per tick
+  // that speed, never below minEndSpeedMMs - as far as minPWM lets it, since
+  // the PWM never goes under the floor. stallEscapePWM is added per tick
   // while the robot is under half the creep speed, so a wheel stuck on a low
   // PWM is freed.
   move.regulator.kSpeedP          = 0.15f;   // PWM per mm/s of error
@@ -188,7 +196,9 @@ void initHardware() {
   // until 200 mm before the target, brake hard over 100 mm down to 200 mm/s
   // and hold that speed over the last 100 mm, so a wall inside that stretch
   // is met at 200 mm/s and one that comes earlier is met while still
-  // braking. The hold takes 0.5 s of the 4 s moveTimeoutMs.
+  // braking. minPWM bounds this too: the wall is met at 200 mm/s or at the
+  // speed the floor gives, whichever is higher. The hold takes 0.5 s of the
+  // 4 s moveTimeoutMs.
   move.longBackwardMM          = 200;
   move.backwardEnd.decelCounts = (long)(100.0f * countsPerMM);
   move.backwardEnd.creepCounts = (long)(100.0f * countsPerMM);
@@ -200,7 +210,7 @@ void initHardware() {
   // 3.0 and 0.6. Errors inside the deadband do not drive the P term.
   move.regulator.kHeadingP            = 12.0f;   // PWM per degree
   move.regulator.kHeadingI            = 0.0f;
-  move.regulator.kHeadingD            = 0.0f;
+  move.regulator.kHeadingD            = 0.4f;
   move.regulator.headingDeadbandDeg   = 0.12f;
   move.regulator.maxHeadingCorrection = 40;      // PWM, per wheel pair
   move.regulator.headingIntegralLimit = 12.0f;   // PWM

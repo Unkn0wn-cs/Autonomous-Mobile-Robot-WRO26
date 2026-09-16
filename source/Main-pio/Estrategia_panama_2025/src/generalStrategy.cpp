@@ -34,24 +34,19 @@ bool midRoutineDone = false;
 
 // ---------------------------------------------------------------------------
 
-// Where the current step should be pointing, in degrees from the boot heading
-// (sign of headingSinceBoot()): 0 up the field, except on the corner legs
-// where the robot has turned a quarter towards its outer wall. NAN while a
-// turn is running and in routine 8 itself - the heading watchdog skips those.
-static float expectedHeading() {
-  const float corner = (robotSide == RIGHT) ? 90.0f : -90.0f;
-  switch (routine) {
-    case 4:
-      if (state == -1 || state == -5) return NAN;               // turning
-      return (state <= -2) ? corner : 0.0f;
-    case 7:
-      if (state == 4 || state == 12) return NAN;                // turning
-      return (state >= 5 && state <= 11) ? corner : 0.0f;
-    case 8:
-      return NAN;
-  }
-  return 0.0f;
+// True in every step where the robot must point north (up the field). False
+// on the corner legs - turn, run along the side wall, turn back - and in the
+// recovery itself; the heading watchdog only looks while this is true.
+static bool mustFaceNorth() {
+  if (routine == 4 && state >= -5 && state <= -1) return false;   // OUTER lane corner leg
+  if (routine == 7 && state >= 4  && state <= 12) return false;   // corner check
+  if (routine == 8) return false;
+  return true;
 }
+
+// When routine 8's recovery spin started; the spin is capped at the move
+// timeout so a wheel that cannot turn the robot square does not hold it there.
+static unsigned long recoverySpinStart = 0;
 
 // ---------------------------------------------------------------------------
 
@@ -456,15 +451,15 @@ void runRoutines() {
 // `routine` only changes between moves, so each move runs whole at one level.
 move.regulator.cruisePWM = (routine <= 3) ? captureCruisePWM : normalCruisePWM;
 
-// Heading watchdog: GENERAL_HEADING_LOST_DEG or more from where this step
-// should point -> routine 8. Needs a fresh reading: a stale sensor reads 0,
-// which on a corner leg would look like a lost heading.
-float wanted = expectedHeading();
-if (headingAvailable() && !isnan(wanted) &&
-    fabs(headingSinceBoot() - wanted) >= GENERAL_HEADING_LOST_DEG) {
+// Heading watchdog: pointing headingLostDeg or more off north (the heading of
+// the last back-wall squaring) in a step that must face north -> routine 8.
+// A stale sensor reads 0, so it never fires without a reading.
+if (mustFaceNorth() && fabs(headingSinceZero()) >= headingLostDeg) {
   routine = 8;
   state = 0;
-  Serial.println(F("heading lost -> routine 8"));
+  Serial.print(F("heading lost: "));
+  Serial.print(headingSinceZero(), 1);
+  Serial.println(F(" deg off north -> routine 8"));
 }
 
 switch (routine) {//---------------------------------------------------------------------------------------ROUTINES---------------------------------------------------------//
@@ -474,23 +469,23 @@ switch (routine) {//------------------------------------------------------------
         if(move.backward(100)) state++;
         break;
       case 1:
-        analogWrite(9, 180); //Rotor capture speed
+        analogWrite(9, slowRotorSpeed); //Rotor capture speed
         myservo.write(closedGate);
         if(move.stopForMillis(mili)) state++;
         break;
       case 2:
-        if(move.forward(550)) state++;
+        if(move.forward(430)) state++;
         break;
       case 3:
-        state++;
+        if(move.stopForMillis(900)) state++;
         break;
       case 4:
         myservo.write(openGate);
         enableDrivers();
-        if(move.forward(400)) state++;
+        if(move.forward(430)) state++;
         break;
       case 5:
-        if(move.stopForMillis(500)) state++;
+        if(move.stopForMillis(700)) state++;
         break;
       case 6:
         myservo.write(closedGate);
@@ -501,6 +496,7 @@ switch (routine) {//------------------------------------------------------------
       }
     break;
   case 1:
+    // Same capture as routine 0, after a strafe right to line up with the ball.
     switch(state){
       case 0:
         if (move.right(250)) state++;
@@ -509,23 +505,23 @@ switch (routine) {//------------------------------------------------------------
         if(move.backward(100)) state++;
         break;
       case 2:
+        analogWrite(9, slowRotorSpeed); //Rotor capture speed
         myservo.write(closedGate);
-        analogWrite(9, 160); //Rotor capture speed
         if(move.stopForMillis(mili)) state++;
         break;
       case 3:
-        if(move.forward(530)) state++;
+        if(move.forward(430)) state++;
         break;
       case 4:
-        state++;
+        if(move.stopForMillis(900)) state++;
         break;
       case 5:
         myservo.write(openGate);
         enableDrivers();
-        if(move.forward(370)) state++;
+        if(move.forward(430)) state++;
         break;
       case 6:
-        if(move.stopForMillis(500)) state++;
+        if(move.stopForMillis(700)) state++;
         break;
       case 7:
         myservo.write(closedGate);
@@ -1008,22 +1004,30 @@ switch (routine) {//------------------------------------------------------------
 
     }
   break;
-  case 8: // Heading recovery: stop, turn until square to the mat, return
+  case 8: // Heading recovery: stop, turn until facing north, then routine 6
     switch(state){
       case 0:
         disableDrivers();
-        if(move.stopForMillis(mili)) state++;
+        if(move.stopForMillis(mili)) { recoverySpinStart = millis(); state++; }
         break;
       case 1: {
-        // Open-loop turn towards the boot heading, watched on the sensor.
-        // A positive reading means the robot turned the B F F B way.
-        float off = headingSinceBoot();
-        if (off > GENERAL_HEADING_DONE_DEG) {
-          move.rotateCCW(GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM);
-        } else if (off < -GENERAL_HEADING_DONE_DEG) {
-          move.rotateCW(GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM, GENERAL_HEADING_TURN_PWM);
+        // Open-loop turn towards north, watched on the sensor, for at most
+        // the move timeout. A positive reading means the robot turned the
+        // B F F B way.
+        float off = headingSinceZero();
+        if (millis() - recoverySpinStart >= move.moveTimeoutMs) {
+          move.stop();
+          Serial.print(F("routine 8 timed out, "));
+          Serial.println(off, 1);
+          state++;
+        } else if (off > headingSquareDeg) {
+          move.rotateCCW(headingTurnPWM, headingTurnPWM, headingTurnPWM, headingTurnPWM);
+        } else if (off < -headingSquareDeg) {
+          move.rotateCW(headingTurnPWM, headingTurnPWM, headingTurnPWM, headingTurnPWM);
         } else {
           move.stop();
+          Serial.print(F("routine 8 facing north, "));
+          Serial.println(off, 1);
           state++;
         }
         break;
