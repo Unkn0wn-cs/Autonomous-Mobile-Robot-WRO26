@@ -242,14 +242,14 @@ class Move {
 
     bool left(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_LEFT, WheelRegulator::Hold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_LEFT, WheelRegulator::BurstHold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(BACKWARD, FORWARD, BACKWARD, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     bool right(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_RIGHT, WheelRegulator::Hold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      armMotion(MOTION_RIGHT, WheelRegulator::BurstHold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
       runRegulated(FORWARD, BACKWARD, FORWARD, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }

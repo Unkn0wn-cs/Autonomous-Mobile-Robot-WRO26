@@ -168,14 +168,14 @@ to be open at the moment the robot passes over where the ball was seen:
 
 **OUTER** — states −1 → −6 (the state counts *down*):
 
-1. rotor off, `rotate(166)` — turn
+1. rotor off, `turnTo(±90)` — turn 90° from north on the heading sensor
 2. `outer(95)` on LEFT / `outer(143)` on RIGHT — strafe outward (KNOWN: a
    per-robot distance the course is tuned around)
 3. `forwardp(400)` — wall-hugging run. KNOWN: `forwardp` returns `2` at
    14/22 of the distance and the bare `if` accepts it, so this state ends at
    ≈255 mm with the motors still running; state −4 releases them.
 4. rotor on, pause
-5. rotor off, `rotate(166)` back
+5. rotor off, `turnTo(0)` — back to north
 6. strafe outward again → drop into state 0 and run the straight above
 
 On the OUTER lane the straight (routine 4 state 2) uses `forwardp` and the
@@ -201,10 +201,14 @@ touches first, and the encoder distance or the 4 s move timeout ends the move
 instead. That is what the corner reset in routine 7 recovers from.
 
 Routine 7 is the full corner reset: reverse into the wall, nudge forward, turn
-by encoder count (`rotate(146)`), strafe out, run 550 mm, reverse, turn
-again (`rotate(166)`), and finish with two small trim rotations. Every turn
-in the routines is encoder-counted; the heading sensor holds the heading
-during straights and strafes, and drives the recovery turn below.
+90° (`turnTo(±90)`), strafe out, run 550 mm, reverse, turn back to north
+(`turnTo(0)`), and finish with two small trim turns (30° out, 20° back). Every
+turn in the routines is on the heading sensor: `move.turnTo()` spins
+open-loop at `headingTurnPWM` to an angle measured from the last back-wall
+squaring and brakes inside `headingSquareDeg` of it; without a heading it
+falls back to the encoder count written next to the angle. The same sensor
+holds the heading during straights and strafes, and drives the recovery turn
+below.
 
 ### Heading recovery (routine 8)
 

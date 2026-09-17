@@ -28,7 +28,7 @@
 //   routine 4     main lane loop
 //   routine 5     diagonal lane
 //   routine 6     return, then camera weighting picks the next lane
-//   routine 7     corner checking reset, encoder-counted turns
+//   routine 7     corner checking reset, turns on the heading sensor
 //   routine 8     heading recovery: stop, turn back to north, then routine 6
 //   routine 9     parking / Pixy ball tracking
 //   routine 10    debugging

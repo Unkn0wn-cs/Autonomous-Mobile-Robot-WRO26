@@ -9,10 +9,9 @@
 // same as the competition firmware after setup(). Put it on the floor with a
 // metre free to each side before uploading.
 //
-// The strafes are the routines' own move.right() / move.left(): heading held,
-// accel ramp, closed-loop deceleration, braked at the count. The pause is the
-// routines' move.stopForMillis(). So whatever this test shows is what a
-// strafe inside a routine does.
+// The strafes are the routines' own move.right() / move.left() (lib/move/
+// move.h), the pause the routines' move.stopForMillis(), so whatever this
+// test shows is what a strafe inside a routine does.
 //
 // BUILD AND RUN
 //   pio run -e strafe_test -t upload

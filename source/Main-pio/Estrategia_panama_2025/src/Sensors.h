@@ -50,8 +50,9 @@ extern Encoders encoderRearLeft;   // A9,  A8   motor2, rear left   - speed only
 // would corrupt a magnetometer. Heading is therefore RELATIVE to power-on,
 // which is all "drive straight" and "turn 80 degrees" need.
 //
-// The sensor is used to hold a heading while the robot translates. Turning
-// is done by encoder count (move.rotate()); the sensor never drives a turn.
+// The sensor holds a heading while the robot translates, and drives the
+// routine turns (move.turnTo(): an angle from the last back-wall squaring,
+// see ZERO below); move.rotate() by encoder count is the fallback without it.
 //
 // SIGN CONVENTION:
 //   the reading INCREASES when the wheels run the B F F B rotation pattern
@@ -65,8 +66,9 @@ extern Encoders encoderRearLeft;   // A9,  A8   motor2, rear left   - speed only
 //           regulator can hold the heading that move began on.
 //   ZERO    set when the back microswitch confirms the robot is square against
 //           the back wall, and at power-on; headingSinceZero() is the heading
-//           relative to that wall - the mat's north. The general strategy's
-//           heading recovery (routine 8) measures against it.
+//           relative to that wall - the mat's north. The routine turns
+//           (move.turnTo(), through the hook set in initHardware()) and the
+//           general strategy's heading recovery (routine 8) measure against it.
 //   BOOT    the heading at power-on. Only the telemetry line reads it, to show
 //           how far the robot has turned since it was switched on.
 //

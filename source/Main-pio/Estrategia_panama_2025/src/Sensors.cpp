@@ -275,7 +275,7 @@ static const uint8_t       HEADER_EVERY_ROWS = 10;     // 2.5 s of rows
 static const unsigned long STATUS_REPEAT_MS  = 5000;   // second status block
 
 // 9600 is the HC-05 / HC-06 factory rate, so a new module works with no
-// configuration. The longest line leaves in about 85 ms at 9600, inside the
+// configuration. A row (84 bytes) leaves in about 90 ms at 9600, inside the
 // 250 ms row period. Change to match if the module was set faster with
 // bt_passthrough.
 static const unsigned long BLUETOOTH_BAUD = 9600;

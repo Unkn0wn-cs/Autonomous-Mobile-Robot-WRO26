@@ -127,6 +127,13 @@ static float regulatorHeadingError() {
   return headingError();
 }
 
+// turnTo()'s input: degrees from north (the last back-wall squaring), NAN
+// while the sensor is unavailable so the turn falls back to the encoders.
+static float turnHeadingNorth() {
+  headingUpdate();
+  return headingAvailable() ? headingSinceZero() : NAN;
+}
+
 void initHardware() {
   // Encoder counts per millimetre for this robot. Every distance the Move
   // library is given in mm - the moves themselves, the regulator's speeds
@@ -139,7 +146,13 @@ void initHardware() {
 
   // The movement layer reads heading through these hooks so lib/move stays
   // independent of the sensor. HEADING_SIGN is applied inside Sensors.cpp.
-  move.setHeadingHooks(&regulatorHeadingError, &headingCaptureTarget);
+  move.setHeadingHooks(&regulatorHeadingError, &headingCaptureTarget, &turnHeadingNorth);
+
+  // Turns (move.turnTo()): the open-loop spin and how close to the target
+  // it stops; the same numbers routine 8 uses for its recovery turn. The
+  // angles are written in the routines.
+  move.turnPWM     = headingTurnPWM;
+  move.turnDoneDeg = headingSquareDeg;
 
   // =========================================================================
   // MOVEMENT CALIBRATION. Every number that decides how the robot drives is
@@ -171,8 +184,8 @@ void initHardware() {
   // millimetre.
   //   burst  moves shorter than this run straight at cruise with no ramp,
   //          no deceleration and no correction - wall nudges. The diagonals
-  //          run at cruise with no ramp whatever their length, but with the
-  //          heading held.
+  //          and the strafes run at cruise with no ramp whatever their
+  //          length, but with the heading held.
   //   ramp   the open-loop accel ramp, rampFraction of the move clamped to
   //          min..max
   //   decel  the closed-loop deceleration, decelFraction of the move clamped
@@ -222,6 +235,16 @@ void initHardware() {
   move.regulator.headingDeadbandDeg   = 0.12f;
   move.regulator.maxHeadingCorrection = 40;      // PWM, per wheel pair
   move.regulator.headingIntegralLimit = 12.0f;   // PWM
+
+  // ---- Strafe sync --------------------------------------------------------
+  // In a strafe the forward-driven pair and the backward-driven pair must run
+  // at the same speed or the robot drifts forward/back. PI on that drift
+  // (mean signed wheel speed, encoders), output taken from the faster pair
+  // and given to the slower one, capped at maxSync per wheel. Strafes and
+  // rotations only; the heading PID is untouched by it.
+  move.regulator.kSyncP  = 0.3f;    // PWM per mm/s of drift
+  move.regulator.kSyncI  = 1.5f;    // PWM per mm/s per second
+  move.regulator.maxSync = 20;      // PWM
 
   // ---- Timing -------------------------------------------------------------
   move.regulator.updateIntervalMs = 4;      // regulator tick, ms

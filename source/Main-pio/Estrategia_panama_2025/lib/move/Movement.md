@@ -173,11 +173,13 @@ microswitch advanced `state`), the next call re-arms from the current counts.
 
 | Primitive | Mode | Heading hold | Completion |
 |---|---|---|---|
-| `forward`, `backward`, `left`, `right` | Hold | yes | front encoder ≥ target, or timeout |
+| `forward`, `backward` | Hold | yes | front encoder ≥ target, or timeout |
 | `forwardRegulated` | Hold | yes | returns 1 at target, 2 at 14/22 of it |
 | `forwardp`, `backwardp`, `forwardq` | Hold, leaning `wallHugDeg` toward the wall | yes | as above (`forwardp` also returns 2 at 14/22) |
+| `left`, `right` (and `inner`, `outer`) | BurstHold, with the strafe sync | yes | front encoder ≥ target, or timeout |
 | `forwardLeft`, `forwardRight`, `backwardLeft`, `backwardRight` | BurstHold | yes | front encoder ≥ target, or timeout |
-| `rotate` | Profile | no | front encoder ≥ target, or timeout |
+| `turnTo` | none — open-loop spin at `turnPWM` watched on the sensor | – | within `turnDoneDeg` of the target angle from north, or timeout; falls back to `rotate()` without a heading |
+| `rotate` | Profile, with the strafe sync | no | front encoder ≥ target, or timeout |
 | `rotateCW`, `rotateCCW` | none | no | open-loop at a fixed PWM; the caller stops it |
 | `stop` | – | – | brakes all four motors and holds them |
 | `stopForMillis` | – | – | brakes, returns true after the delay (one shared timer) |
@@ -188,6 +190,17 @@ heading PID keeps the robot at that lean, so the leading corner stays pressed on
 the wall and friction cannot turn it further. `position` says which side the
 wall is on (`false` left, `true` right); reversing, the tail leads so the nose
 leans the other way; `forwardq` hugs the inner wall, the mirror of `forwardp`.
+
+`turnTo(targetDeg, fallbackMM, fallbackSide)` turns to an angle **from north**
+— the `headingNorth` hook, `headingSinceZero()` in `Sensors.h`, i.e. degrees
+from the last back-wall squaring — not by a relative amount, so the turn back
+is always `turnTo(0)`. It spins open-loop at `turnPWM`, `rotateCCW()` while the
+reading is above the target and `rotateCW()` while below, and brakes once
+inside `turnDoneDeg`, or at `moveTimeoutMs`. A new target starts a new turn,
+so a turn a microswitch abandoned does not carry its timer into the next one.
+While the hook returns NAN (sensor unavailable) it runs `rotate(fallbackMM,
+fallbackSide)` instead. The routines write the angles next to the call; the
+sign follows the sensor (RIGHT's corner turn is `+90`, LEFT's `-90`).
 
 ### Trims
 
@@ -222,9 +235,9 @@ public members, set in `initHardware()` (`src/Hardware.cpp`).
 | Mode | Speed profile | Heading PID | Used by |
 |---|---|---|---|
 | Burst | no — straight to `cruisePWM`, brake at the target | no | any move shorter than 30 mm (wall nudges) |
-| BurstHold | no — straight to `cruisePWM`, brake at the target | yes | the diagonals, whatever their length |
-| Profile | yes | no | rotations |
-| Hold | yes | yes | forward / backward / left / right / forwardRegulated, and the wall-hugging straights with a `wallHugDeg` lean |
+| BurstHold | no — straight to `cruisePWM`, brake at the target | yes | the diagonals and the strafes, whatever their length |
+| Profile | yes | no | encoder rotations (the `turnTo` fallback) |
+| Hold | yes | yes | forward / backward / forwardRegulated, and the wall-hugging straights with a `wallHugDeg` lean |
 
 ### Speed profile (encoders)
 
@@ -307,10 +320,32 @@ heading captured when the move began, −180..+180, sign convention below.
 A jump of more than 30° between two ticks is a sensor re-reference (reset, or a
 stale read returning), not the robot turning: I and D restart from there.
 
+### Strafe sync (encoders)
+
+The one place the encoders steer. In a strafe the two wheels driven forward and
+the two driven backward must run at the same speed: their forward components
+cancel and only the sideways motion is left. When one pair is faster — one
+motor weaker, or the motors weaker in reverse — the robot drifts forward or
+back, and the heading PID cannot see that (it is not a rotation). The signed
+sum of the four wheel speeds *is* that drift, so a PI drives it to zero:
+
+| Term | Value | Notes |
+|---|---|---|
+| Drift | mean of `dirSign_i · speed_i`, mm/s | forward positive; per-wheel speeds filtered 0.75/0.25 |
+| P | `kSyncP` 0.3 PWM per mm/s | |
+| I | `kSyncI` 1.5 PWM per mm/s per second | frozen while saturated |
+| Output | ±`maxSync` 20 PWM | taken from the forward-driven wheels, given to the backward-driven ones |
+
+It runs only when every wheel is driven and the commanded directions sum to
+zero — strafes and encoder rotations — and is off for straights and diagonals,
+whose forward components are meant not to cancel. Applying `−sync · dirSign_i`
+to every wheel changes the forward velocity alone: the heading and the strafe
+speed are untouched.
+
 ### From differential to wheels
 
 ```
-pwm_i = common + trim_i + differential · ROT_i · dirSign_i     ROT = {+1, −1, −1, +1}
+pwm_i = common + trim_i + differential · ROT_i · dirSign_i − sync · dirSign_i     ROT = {+1, −1, −1, +1}
 ```
 
 `ROT` puts wheels 1 and 4 against 2 and 3 — the `F B B F` rotation pattern.

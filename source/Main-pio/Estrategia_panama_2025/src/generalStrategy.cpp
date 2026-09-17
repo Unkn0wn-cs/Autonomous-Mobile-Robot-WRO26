@@ -607,11 +607,14 @@ switch (routine) {//------------------------------------------------------------
   case 4:
     switch(state){
       case -1:                //OUTER LANE
+        // Turns are on the heading sensor: degrees from north (the last
+        // back-wall squaring), RIGHT positive, LEFT negative; the mm and
+        // pattern after the angle are the encoder fallback without a heading.
         disableDrivers();
         if (robotSide == RIGHT){
-          if(move.rotate(166, false)) state--;
+          if(move.turnTo( 90, 166, false)) state--;
         }else{
-          if(move.rotate(186, true)) state--;
+          if(move.turnTo(-90, 186, true)) state--;
         }
         break;
       case -2:
@@ -635,9 +638,9 @@ switch (routine) {//------------------------------------------------------------
       case -5:
         disableDrivers();
         if (robotSide == RIGHT){
-          if(move.rotate(166, true)) state--;
+          if(move.turnTo(0, 166, true)) state--;
         }else{
-          if(move.rotate(186, false)) state--;
+          if(move.turnTo(0, 186, false)) state--;
         }
         break;
       case -6:
@@ -944,10 +947,12 @@ switch (routine) {//------------------------------------------------------------
         if(move.stopForMillis(mili)) state++;
         break;
       case 4:
+        // Turns on the heading sensor, as in routine 4: degrees from north,
+        // RIGHT positive, LEFT negative, then the encoder fallback.
         if(robotSide == RIGHT){
-          if(move.rotate(146, false)) state++;
+          if(move.turnTo( 90, 146, false)) state++;
         } else {
-          if(move.rotate(186, true)) state++;
+          if(move.turnTo(-90, 186, true)) state++;
         }
         break;
       case 5:
@@ -982,9 +987,9 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 12:
         if(robotSide != RIGHT){
-          if(move.rotate(186, false)) state++;
+          if(move.turnTo(0, 186, false)) state++;
         } else {
-          if(move.rotate(166, true)) state++;
+          if(move.turnTo(0, 166, true)) state++;
         }
         break;
       case 13:
@@ -997,11 +1002,14 @@ switch (routine) {//------------------------------------------------------------
         if(move.stopForMillis(mili)) state++;
         break;
       case 16:
+        // Trim turns: 30 degrees out, then 20 back the other way, so the
+        // robot settles 10 degrees from north. Angles from north, so the
+        // second target is 30 - 20.
         enableDrivers();
         if(robotSide == RIGHT){
-          if(move.rotate(30, true)) state++;
+          if(move.turnTo(-30, 30, true)) state++;
         } else {
-          if(move.rotate(30, false)) state++;
+          if(move.turnTo( 30, 30, false)) state++;
         }
         break;
       case 17:
@@ -1009,9 +1017,9 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 18:
         if(robotSide == LEFT){
-          if(move.rotate(20, true)) state++;
+          if(move.turnTo( 10, 20, true)) state++;
         } else {
-          if(move.rotate(20, false)) state++;
+          if(move.turnTo(-10, 20, false)) state++;
         }
         break;
       case 19:
