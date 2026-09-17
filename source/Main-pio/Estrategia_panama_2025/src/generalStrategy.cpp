@@ -499,10 +499,13 @@ switch (routine) {//------------------------------------------------------------
       }
     break;
   case 1:
-    // Same capture as routine 0, after a strafe right to line up with the ball.
     switch(state){
       case 0:
-        if (move.right(250)) state++;
+        if(robotSide == RIGHT){
+          if(move.right(250)) state++;
+        } else{
+          if(move.right(450)) state++;
+        }
         break;
       case 1:
         if(move.backward(200)) state++;
@@ -566,7 +569,11 @@ switch (routine) {//------------------------------------------------------------
   case 3:
     switch(state){
       case 0:
-        if(move.right(250)) state++;
+        if(robotSide == RIGHT){
+          if(move.right(250)) state++;
+        } else{
+          if(move.right(450)) state++;
+        }
         break;
       case 1:
         if(move.backward(250)) state++;
@@ -604,7 +611,7 @@ switch (routine) {//------------------------------------------------------------
         if (robotSide == RIGHT){
           if(move.rotate(166, false)) state--;
         }else{
-          if(move.rotate(166, true)) state--;
+          if(move.rotate(186, true)) state--;
         }
         break;
       case -2:
@@ -727,7 +734,7 @@ switch (routine) {//------------------------------------------------------------
         if(robotSide == RIGHT){
           if(move.inner(30)) state++;
         } else{
-          if(move.inner(80)) state++;
+          if(move.inner(120)) state++;
         }
         break;
       case 1:
@@ -761,7 +768,7 @@ switch (routine) {//------------------------------------------------------------
         if (robotSide == RIGHT){
           if(move.forwardq(lenght/3 + 220, true)){state++;}
         } else {
-          if(move.forwardq(lenght/2 + 160, false)){state++;}
+          if(move.forwardq(lenght/2 + 60, false)){state++;}
         }
         break;
       case 9:
@@ -806,15 +813,15 @@ switch (routine) {//------------------------------------------------------------
         if(move.stopForMillis(mili)) state++;
         break;
       case 4: // Complex logic for Ramp robot redundancy and lane correction
-        if (!(lane == OUTER) && first == true){
-          if(move.inner(240)) state++;
-        } else if (first == true){
+        if (first == true && lane == OUTER){
           state = 7;
           break;
-        }else if(!first){
-          if(move.inner(240)) state++;
         }
-        pixy.setLamp(0, 0);
+        if(robotSide == RIGHT){
+          if(move.inner(200)) state++;
+        } else{
+          if(move.inner(300)) state++;
+        }
         break;
       case 5:
         if(move.backward(200)) state++;
@@ -849,7 +856,10 @@ switch (routine) {//------------------------------------------------------------
               }
             }
 
-            if (connections < 2){
+            // Only a franja with a ball in it may change the lane. With
+            // nothing orange in view every weight is 0 and `lane` stays as the
+            // routines set it, so the lanes run OUTER -> MIDDLE -> INNER.
+            if (pesos[mejorFranja] > 0 && connections < 2){
               if (mejorFranja == 0){
                 if (robotSide == RIGHT){
                   lane = INNER;
@@ -937,7 +947,7 @@ switch (routine) {//------------------------------------------------------------
         if(robotSide == RIGHT){
           if(move.rotate(146, false)) state++;
         } else {
-          if(move.rotate(146, true)) state++;
+          if(move.rotate(186, true)) state++;
         }
         break;
       case 5:
@@ -946,7 +956,7 @@ switch (routine) {//------------------------------------------------------------
       case 6:
         // KNOWN: per-robot distance the course is tuned around, same as
         // routine 4 state -2.
-        if(move.outer(robotSide == LEFT ? 95 : 143)) state++;
+        if(move.outer(robotSide == LEFT ? 150 : 143)) state++;
         break;
       case 7:
         if(move.stopForMillis(mili/2)) state++;

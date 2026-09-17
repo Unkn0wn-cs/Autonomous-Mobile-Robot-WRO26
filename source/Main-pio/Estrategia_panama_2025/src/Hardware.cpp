@@ -17,18 +17,18 @@
 // ===========================================================================
 // LEFT - WALL
 // ===========================================================================
-  int pwmf[4] = {243, 243, 243, 243};
-  int pwms[4] = {200, 200, 200, 200};
+  int pwmf[4] = {245, 245, 245, 245};
+  int pwms[4] = {238, 238, 240, 240};
   extern const long pulses = 800;  // encoder counts per wheel revolution
   side robotSide = LEFT;
-  int slowRotorSpeed = 120;
-  int fastRotorSpeed = 220;
-  int captureRotorSpeed = 100;
-  const int maxPWM           = 250;  // ceiling for every wheel
-  const int minPWM           = 220;  // floor for every driven wheel and the decel loop
-  const int rampStartPWM     = 220;  // where the accel ramp starts
-  const int normalCruisePWM  = 225;  // every routine
-  const int captureCruisePWM = 190;
+  int slowRotorSpeed = 170;
+  int fastRotorSpeed = 255;
+  int captureRotorSpeed = 120;
+  const int maxPWM           = 255;  // ceiling for every wheel
+  const int minPWM           = 230;  // floor for every driven wheel and the decel loop
+  const int rampStartPWM     = 230;  // where the accel ramp starts
+  const int normalCruisePWM  = 245;  // every routine
+  const int captureCruisePWM = 220;
   const float wallHugDeg     = 3.0f; // angle the wall moves hold toward the wall
   const int headingLostDeg   = 70;   // off north by this -> routine 8
   const int headingSquareDeg = 8;    // routine 8 stops turning inside this
@@ -51,8 +51,8 @@
   // int pwms[4] = {200, 200, 200, 200};
   // extern const long pulses = 1350;  // encoder counts per wheel revolution
   // side robotSide = RIGHT;
-  // int slowRotorSpeed = 120;
-  // int fastRotorSpeed = 220;
+  // int slowRotorSpeed = 100;
+  // int fastRotorSpeed = 200;
   // int captureRotorSpeed = 78;
   // const int maxPWM           = 250;  // ceiling for every wheel
   // const int minPWM           = 220;  // floor for every driven wheel and the decel loop
@@ -66,7 +66,7 @@
   // int closedGate =116;
   // int openGate = 0;
   // int lenght = 680;
-  // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
+  // // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
   // extern const int ballZones[NUM_BALL_ZONES][4] = {
   //   { 142,  32,  160,  15 },   // routine 0 - upper left
   //   { 245,  33,  260,  20 },   // routine 1 - upper right
@@ -217,10 +217,10 @@ void initHardware() {
   // PID on the BNO08x error, output a PWM differential between the wheel
   // pairs. Proportional only for the first run; I and D starting points are
   // 3.0 and 0.6. Errors inside the deadband do not drive the P term.
-  move.regulator.kHeadingP            = 12.0f;   // PWM per degree
+  move.regulator.kHeadingP            = 11.0f;   // PWM per degree
   move.regulator.kHeadingI            = 0.0f;
-  move.regulator.kHeadingD            = 0.4f;
-  move.regulator.headingDeadbandDeg   = 0.12f;
+  move.regulator.kHeadingD            = 0.0f;
+  move.regulator.headingDeadbandDeg   = 0.14f;
   move.regulator.maxHeadingCorrection = 40;      // PWM, per wheel pair
   move.regulator.headingIntegralLimit = 12.0f;   // PWM
 

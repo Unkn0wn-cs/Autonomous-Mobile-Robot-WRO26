@@ -85,8 +85,8 @@ One lap is:
         routine 4/5           routine 6                        routine 6 state 7
 ```
 
-`lane` is chosen by *where the orange balls actually are*, not by a fixed
-rotation.
+`lane` is chosen by *where the orange balls actually are*; with no orange ball
+in view the lanes run in order, outer → middle → inner.
 
 ### Choosing a lane from the camera (routine 6, states 5–7)
 
