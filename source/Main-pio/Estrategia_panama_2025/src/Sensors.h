@@ -156,14 +156,16 @@ int testI2C();
 // First a STATUS BLOCK - which robot, every sensor's state, the opening
 // routine and a verdict - at the end of setup() and again 5 s later, so a
 // phone that connects late still sees it. Then a TABLE of the drive state,
-// one row every 250 ms, header repeated every 20 rows:
+// one row every 250 ms, header repeated every 10 rows. Every value that has
+// a direction carries its sign, so a column never shifts between + and -:
 //
-//     r   s     hdg     err   corr  pwm1 pwm2 pwm3 pwm4     v1    v2    v3    v4
-//     4   2    -1.2   -0.35    3.2   232  240  228  235    310   305   312   300
+//     r   s |    hdg     err corr | pwm  m1  m2  m3  m4 | mm/s    m1    m2    m3    m4
+//     4   2 |   -1.2   -0.35   +3 |     232 240 228 235 |       +310  -305  +312  -300
 //
+//   r s   routine and state (a bench test shows its own cycle and step)
 //   hdg   heading since power-on, degrees      err   error the regulator sees
-//   corr  heading differential, PWM            pwm   motor1..motor4, 0 = released
-//   v     motor1..motor4 in mm/s, signed by encoder direction
+//   corr  heading differential, whole PWM      pwm   motor1..motor4, 0 = released
+//   mm/s  motor1..motor4, signed by encoder direction
 //
 // Never blocks: every call sends at most one line, and only when both ports
 // have room for all of it. Whatever is not a sensor is handed in as an

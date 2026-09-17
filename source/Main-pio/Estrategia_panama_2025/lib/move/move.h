@@ -117,15 +117,22 @@ class Move {
     }
 
     // Where the heading comes from. Set once in initHardware(). Function
-    // pointers keep this library independent of the sensor; with neither set,
-    // every movement runs without heading hold.
+    // pointers keep this library independent of the sensor; with none set,
+    // every movement runs without heading hold and turnTo() turns by count.
     float (*headingSource)()  = 0;   // current error from the held heading, degrees
     void  (*headingCapture)() = 0;   // "hold whatever heading we are on now"
+    float (*headingNorth)()   = 0;   // degrees from north, NAN when unavailable
 
-    void setHeadingHooks(float (*source)(), void (*capture)()) {
+    void setHeadingHooks(float (*source)(), void (*capture)(), float (*north)() = 0) {
       headingSource  = source;
       headingCapture = capture;
+      headingNorth   = north;
     }
+
+    // turnTo(): the PWM of its open-loop spin and how close to the target it
+    // stops. Set in initHardware().
+    int   turnPWM     = 200;
+    float turnDoneDeg = 5.0f;
 
     // Zeroes the start counts of all four wheels and arms the regulator.
     // `targetPulses` sizes the profile; `mode` selects Burst / Profile / Hold;
@@ -212,7 +219,12 @@ class Move {
     }
 
     // ---- Free translations -----------------------------------------------
-    // Speed profile + heading hold.
+    // forward/backward: speed profile + heading hold. left/right: BurstHold,
+    // cruise for the whole move with the heading held - a strafe needs more
+    // PWM to break away than a straight, and the profile's low end (the ramp
+    // start, the decel creep at minPWM) is where it stalls and jerks. The
+    // regulator's strafe sync (encoders) keeps the two wheel pairs matched so
+    // the move does not drift forward or back.
 
     bool forward(int millimetres) {
       long pulses = toCounts(millimetres);
@@ -308,6 +320,47 @@ class Move {
       return checkDoneWithTimeout(pulses);
     }
 
+    // Turn on the heading sensor to `targetDeg`, an angle FROM NORTH (the
+    // headingNorth hook: degrees from the last back-wall squaring), not a
+    // relative turn. Open-loop spin at turnPWM, watched on the sensor, braked
+    // once inside turnDoneDeg of the target, capped at moveTimeoutMs. The
+    // sign follows the sensor: a target reached the B F F B way (rotateCW())
+    // is positive. Without a heading it turns by encoder count instead:
+    // `fallbackMM` of wheel travel on `fallbackSide`, as rotate() would.
+    // Returns true once, when the turn is over.
+    bool turnTo(float targetDeg, int fallbackMM, bool fallbackSide) {
+      float north = headingNorth ? headingNorth() : NAN;
+      if (isnan(north)) {
+        turnTarget = NAN;
+        return rotate(fallbackMM, fallbackSide);
+      }
+
+      // A new target starts a new turn, which also covers a turn a routine
+      // abandoned half way: its timer is not carried into the next one.
+      if (turnTarget != targetDeg) {
+        turnTarget = targetDeg;
+        moveStartTime = millis();
+        moving = false;
+      }
+
+      float off = north - targetDeg;
+      if (off >  180.0f) off -= 360.0f;
+      if (off < -180.0f) off += 360.0f;
+
+      bool inside  = off <= turnDoneDeg && off >= -turnDoneDeg;
+      bool timeout = millis() - moveStartTime > moveTimeoutMs;
+      if (inside || timeout) {
+        stop();
+        turnTarget = NAN;
+        return true;
+      }
+
+      // A positive reading means the robot turned the B F F B way; CCW lowers it.
+      if (off > 0) rotateCCW(turnPWM, turnPWM, turnPWM, turnPWM);
+      else         rotateCW (turnPWM, turnPWM, turnPWM, turnPWM);
+      return false;
+    }
+
     // Open-loop rotation at fixed PWM. Not distance-counted: the caller decides
     // when to stop. The heading reading INCREASES under rotateCW() and
     // DECREASES under rotateCCW() - see the heading section of Sensors.h.
@@ -398,6 +451,7 @@ class Move {
     long startRight = 0;
     bool moving = false;
     unsigned long moveStartTime = 0; // For movement timeout
+    float turnTarget = NAN;          // turnTo() target in progress, NAN when none
 
     // One entry per motor, indexed motor1..motor4 as 0..3.
     Encoders* encoders[WheelRegulator::WHEEL_COUNT];

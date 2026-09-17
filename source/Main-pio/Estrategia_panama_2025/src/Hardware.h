@@ -134,10 +134,12 @@ extern const int normalCruisePWM;   // every routine
 extern const int captureCruisePWM;  // the purple-ball captures, routines 0-3.
 extern const float wallHugDeg;      // degrees the wall moves lean toward the wall
 
-// Heading recovery (routine 8 in the general strategy): how far off north the
-// robot may point before it stops and turns back, how close it must get, and
-// the PWM of that open-loop turn. North is the heading of the last back-wall
-// squaring (headingSinceZero() in Sensors.h).
+// Turns on the heading sensor (turnTo() in the general strategy, and the
+// routine 8 recovery): the PWM of the open-loop spin and how close to the
+// target it stops. headingLostDeg is how far off north the robot may point
+// before routine 8 turns it back. North is the heading of the last back-wall
+// squaring (headingSinceZero() in Sensors.h); the turn angles themselves are
+// written in the routines.
 extern const int headingLostDeg;
 extern const int headingSquareDeg;
 extern const int headingTurnPWM;

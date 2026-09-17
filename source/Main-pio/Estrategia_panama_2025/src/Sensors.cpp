@@ -271,7 +271,7 @@ int testI2C() {
 
 static const bool          TELEMETRY         = true;   // false silences both ports
 static const unsigned long ROW_EVERY_MS      = 250;
-static const uint8_t       HEADER_EVERY_ROWS = 20;     // 5 s of rows
+static const uint8_t       HEADER_EVERY_ROWS = 10;     // 2.5 s of rows
 static const unsigned long STATUS_REPEAT_MS  = 5000;   // second status block
 
 // 9600 is the HC-05 / HC-06 factory rate, so a new module works with no
@@ -376,16 +376,26 @@ static int statusLine(uint8_t k) {
 // Same widths as rowLine() below, so the columns line up.
 static int headerLine() {
   return snprintf_P(line, sizeof line,
-    PSTR("  r   s     hdg     err   corr  pwm1 pwm2 pwm3 pwm4     v1    v2    v3    v4\r\n"));
+    PSTR("  r   s |    hdg     err corr | pwm  m1  m2  m3  m4 | mm/s    m1    m2    m3    m4\r\n"));
+}
+
+// "+1.2" / "-0.35": a column that only sometimes carries a sign jitters when
+// read at speed, so every heading value is written with its sign. dtostrf()
+// never writes a '+'.
+static void signedStr(float v, uint8_t decimals, char* out) {
+  out[0] = (v < 0.0f) ? '-' : '+';
+  dtostrf(v < 0.0f ? -v : v, 1, decimals, out + 1);
 }
 
 static int rowLine(int routine, int state, const int pwm[4], float headingCorr,
                    const long count[4], unsigned long elapsed) {
   // Floats are formatted separately: avr-libc's snprintf has no %f.
-  char hdg[9], err[9], corr[8];
-  dtostrf(headingSinceBoot(), 7, 1, hdg);
-  dtostrf(headingError(),     7, 2, err);
-  dtostrf(headingCorr,        6, 1, corr);
+  char hdg[10], err[10];
+  signedStr(headingSinceBoot(), 1, hdg);
+  signedStr(headingError(),     2, err);
+
+  // The differential is applied as whole PWM, so it is shown as one.
+  int corr = (int)(headingCorr + (headingCorr < 0.0f ? -0.5f : 0.5f));
 
   int v[4];
   for (uint8_t i = 0; i < 4; i++) {
@@ -393,7 +403,7 @@ static int rowLine(int routine, int state, const int pwm[4], float headingCorr,
   }
 
   return snprintf_P(line, sizeof line,
-    PSTR("%3d %3d %s %s %s  %4d %4d %4d %4d  %5d %5d %5d %5d\r\n"),
+    PSTR("%3d %3d | %6s %7s %+4d |     %3d %3d %3d %3d |      %+5d %+5d %+5d %+5d\r\n"),
     routine, state, hdg, err, corr,
     pwm[0], pwm[1], pwm[2], pwm[3], v[0], v[1], v[2], v[3]);
 }
