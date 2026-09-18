@@ -8,9 +8,10 @@
 // ---------------------------------------------------------------------------
 // Encoders. ORDER IS SIGNIFICANT - see the warning in Sensors.h.
 //
-// The front pair measures travelled distance and decides when a move is over;
-// all four feed the mean speed the deceleration loop tracks. The constructor
-// sets the pins as inputs with pull-ups and attaches the interrupts.
+// The trusted ones (trustedEncoders[] in Hardware.cpp) measure travelled
+// distance, decide when a move is over and feed the mean speed the
+// deceleration loop tracks. The constructor sets the pins as inputs with
+// pull-ups and attaches the interrupts.
 // ---------------------------------------------------------------------------
 
 Encoders encoderLeft(A15, A14);      // motor3, front left

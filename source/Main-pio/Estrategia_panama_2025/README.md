@@ -52,9 +52,13 @@ One firmware, one robot selected by commenting a block at the top of
 | Gate closed / open | 180° / 55° | 116° / 0° |
 | Waits for start switch | **yes** | no |
 
-`pwmf`/`pwms` are per-wheel **trims**: the drive layer runs every wheel from its
-own cruise PWM and uses only the differences between the four numbers (see
-Movement.md).
+`pwmf` are per-wheel **trims**: the drive layer runs every wheel from its own
+cruise PWM and uses only the differences between the four numbers. `pwms` are
+the PWM each wheel **actually runs at in a strafe**, calibrated by hand with
+`strafe_test`, with a small heading trim on top; the diagonals use only their
+differences (see Movement.md). `trustedEncoders` in the same block says which
+encoders end a move — a move ends when the second trusted wheel reaches its
+count.
 
 Both robots: Arduino Mega 2560, Adafruit Motor Shield v1 (L293D, 12 V), four
 12 V motors with a quadrature encoder each, four 60 mm 45° omni wheels on a

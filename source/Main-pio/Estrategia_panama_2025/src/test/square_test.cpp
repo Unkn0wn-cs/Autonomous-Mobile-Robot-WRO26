@@ -107,11 +107,12 @@ static void trace() {
 }
 
 // Printed once the robot has settled after a move: how far past the target
-// the front wheels ended up, and whether any encoder skipped transitions
-// (a rising error count means missed edges, i.e. under-counting). The
-// regulator still holds the target of the move that just ended.
+// the trusted wheels ended up (the travel the finish was judged on), and
+// whether any encoder skipped transitions (a rising error count means missed
+// edges, i.e. under-counting). The regulator still holds the target of the
+// move that just ended.
 static void settled() {
-  long over = move.frontTravelCounts() - move.regulator.target();
+  long over = move.travelCounts() - move.regulator.target();
   Serial.print(F("    overshoot "));
   Serial.print(over / move.regulator.countsPerMM, 1);
   Serial.print(F(" mm   encoder errors "));

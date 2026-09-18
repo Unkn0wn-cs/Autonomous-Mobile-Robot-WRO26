@@ -14,7 +14,7 @@
 //
 // Every tick the four wheel PWMs are
 //
-//   pwm_i = common + trim_i + differential * ROT_i * dirSign_i - sync * dirSign_i
+//   pwm_i = common + trim_i + differential * ROT_i * dirSign_i
 //
 //   common        the speed profile: an open-loop ramp from rampStartPWM to
 //                 cruisePWM while accelerating, cruisePWM, then a closed-loop
@@ -27,14 +27,10 @@
 //                 F B B F rotation pattern
 //   dirSign_i     +1 forward, -1 backward, 0 released, so the same
 //                 differential turns the robot the same way whatever the move
-//   sync          strafe sync, the one place the encoders steer: in a strafe
-//                 (or a rotation) the wheels' forward components must cancel,
-//                 and the signed sum of the four wheel speeds is what is left
-//                 - the robot drifting forward or back because one pair is
-//                 faster than the other. A PI drives that sum to zero by
-//                 trimming each wheel along its own direction, which changes
-//                 neither the heading nor the strafe itself. Off for any move
-//                 whose commanded directions do not sum to zero.
+//
+// The encoders feeding the profile are the TRUSTED ones (move.h hands in
+// which): a wheel whose encoder is known dead is left out of the mean, so it
+// cannot drag the distance and the speed down to a fraction of the truth.
 //
 // If a wheel would exceed maxPWM the whole set is shifted down instead of
 // clipping the differential. If a driven wheel would then fall below minPWM
@@ -43,7 +39,9 @@
 // same way.
 //
 // This class does not decide when a move is finished - move.h does that from
-// the front encoders and brakes at the target.
+// the trusted encoders and brakes at the target. The strafes do not use it
+// at all: they run on the calibrated pwms[] with their own heading trim, in
+// move.h.
 
 #pragma once
 
@@ -59,9 +57,8 @@ class WheelRegulator {
       // cruise PWM, no profile and no correction: the wall does the aligning.
       Burst,
       // Burst power with the heading PID: straight to cruise PWM, no profile,
-      // heading held. The diagonals and the strafes, whatever their length -
-      // the wheels get everything and the robot keeps pointing the way it
-      // started.
+      // heading held. The diagonals, whatever their length - two wheels get
+      // everything and the robot keeps pointing the way it started.
       BurstHold,
       // Speed profile only, no heading hold. Wall-hugging straights (the wall
       // aligns them) and rotations (a turn is meant to change the heading).
@@ -147,14 +144,6 @@ class WheelRegulator {
     // in which case heading hold simply does nothing.
     float headingErrorDeg = 0.0f;
 
-    // ---- Strafe sync (encoders) --------------------------------------------
-    // PI on the robot's forward drift in a strafe or rotation (mean signed
-    // wheel speed, mm/s): PWM per mm/s, PWM per mm/s per second, and the cap
-    // on the trim it may apply to each wheel. 0 gains switch it off.
-    float kSyncP = 0.0f;
-    float kSyncI = 0.0f;
-    int   maxSync = 0;
-
     // Control period. dt is measured, so the gains hold if a tick runs late.
     uint8_t updateIntervalMs = 4;
 
@@ -207,14 +196,9 @@ class WheelRegulator {
       _headingD = 0.0f;
       _headingCorr = 0.0f;
 
-      _syncI = 0.0f;
-      _syncCorr = 0.0f;
-
       for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
         _dirSign[i] = 1;
         _prog[i] = 0;
-        _wheelSpeed[i] = 0.0f;
-        _lastWheelProg[i] = 0.0f;
       }
 
       _first = true;
@@ -223,9 +207,11 @@ class WheelRegulator {
 
     // One observation.
     //   driven[i]   - false for wheels this motion releases
+    //   trusted[i]  - false for wheels whose encoder is known dead (move.h)
     //   progress[i] - |encoder counts| travelled by wheel i since the move began
     //   dirSign[i]  - +1 commanded forward, -1 backward, 0 released
     void update(const bool driven[WHEEL_COUNT],
+                const bool trusted[WHEEL_COUNT],
                 const long progress[WHEEL_COUNT],
                 const int8_t dirSign[WHEEL_COUNT]) {
 
@@ -246,14 +232,6 @@ class WheelRegulator {
       float dt = elapsed * 0.001f;
       _lastUpdate = now;
 
-      // Per-wheel speed, counts/s, lightly filtered, for the strafe sync.
-      for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
-        float v = ((float)progress[i] - _lastWheelProg[i]) / dt;
-        _lastWheelProg[i] = (float)progress[i];
-        _wheelSpeed[i] = 0.75f * _wheelSpeed[i] + 0.25f * v;
-      }
-      syncPairs(driven, dt);
-
       if (_mode == Burst || _mode == BurstHold) {
         _profile = 1.0f;
         _common = (float)cruisePWM;
@@ -262,10 +240,16 @@ class WheelRegulator {
       }
 
       // ---- Speed profile (encoders) --------------------------------------
+      // Mean travel of the driven wheels whose encoder is trusted; if this
+      // motion drives none of those, of every driven wheel.
       long sum = 0; uint8_t n = 0;
       for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
-        if (!driven[i]) continue;
-        sum += progress[i]; n++;
+        if (driven[i] && trusted[i]) { sum += progress[i]; n++; }
+      }
+      if (n == 0) {
+        for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
+          if (driven[i]) { sum += progress[i]; n++; }
+        }
       }
       float mean = n ? (float)sum / (float)n : 0.0f;
       long travelled = (long)mean;
@@ -337,19 +321,18 @@ class WheelRegulator {
     }
 
     // The four wheel PWMs for this instant, given each wheel's trim (its
-    // offset from the mean of pwmf[]/pwms[]). The heading differential and
-    // the strafe sync are applied in full: if the highest wheel would exceed
-    // maxPWM, all four are shifted down by the excess instead of clipping
-    // them. A driven wheel is then held at minPWM or above; a released
-    // wheel's PWM is not a drive level and is left alone.
+    // offset from the mean of pwmf[]/pwms[]). The heading differential is
+    // applied in full: if the highest wheel would exceed maxPWM, all four are
+    // shifted down by the excess instead of clipping it. A driven wheel is
+    // then held at minPWM or above; a released wheel's PWM is not a drive
+    // level and is left alone.
     void computePWM(const int trim[WHEEL_COUNT], int out[WHEEL_COUNT]) const {
       static const int8_t ROT[WHEEL_COUNT] = {1, -1, -1, 1};
       float u[WHEEL_COUNT];
       float highest = 0.0f;
       for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
         float heading = _headingCorr * (float)ROT[i] * (float)_dirSign[i];
-        float sync    = _syncCorr * (float)_dirSign[i];
-        u[i] = _common + (float)trim[i] + heading - sync;
+        u[i] = _common + (float)trim[i] + heading;
         if (u[i] > highest) highest = u[i];
       }
       float shift = highest - (float)maxPWM;
@@ -372,7 +355,6 @@ class WheelRegulator {
     float speedMMs()      const { return _speed / countsPerMM; }
     float commandMMs()    const { return (_phase == Decel) ? _vCmd / countsPerMM : 0.0f; }
     float headingCorr()   const { return _headingCorr; }
-    float syncCorr()      const { return _syncCorr; }     // PWM, forward-driven wheels get -it
     long  progress(uint8_t i) const { return i < WHEEL_COUNT ? _prog[i] : 0; }
 
   private:
@@ -399,48 +381,8 @@ class WheelRegulator {
     float _headingD = 0.0f;
     float _lastHeadingErr = 0.0f;
 
-    float _wheelSpeed[WHEEL_COUNT]    = {0, 0, 0, 0};   // counts/s, filtered
-    float _lastWheelProg[WHEEL_COUNT] = {0, 0, 0, 0};
-    float _syncCorr = 0.0f;
-    float _syncI = 0.0f;
-
     bool _first = true;
     unsigned long _lastUpdate = 0;
-
-    // The strafe sync: runs only when every wheel is driven and the commanded
-    // directions sum to zero (a strafe or a rotation), so the forward
-    // components should cancel. The drift is the mean signed wheel speed in
-    // mm/s; the PI output is the PWM taken from the forward-driven wheels and
-    // given to the backward-driven ones.
-    void syncPairs(const bool driven[WHEEL_COUNT], float dt) {
-      bool   allDriven = true;
-      int8_t sum = 0;
-      for (uint8_t i = 0; i < WHEEL_COUNT; i++) {
-        if (!driven[i]) allDriven = false;
-        sum += _dirSign[i];
-      }
-      if (!allDriven || sum != 0 || (kSyncP == 0.0f && kSyncI == 0.0f) || countsPerMM <= 0.0f) {
-        _syncCorr = 0.0f;
-        _syncI = 0.0f;
-        return;
-      }
-
-      float drift = 0.0f;
-      for (uint8_t i = 0; i < WHEEL_COUNT; i++) drift += (float)_dirSign[i] * _wheelSpeed[i];
-      drift = drift / (float)WHEEL_COUNT / countsPerMM;   // mm/s, forward positive
-
-      float u = kSyncP * drift + _syncI;
-      bool saturated = (u > (float)maxSync) || (u < -(float)maxSync);
-      if (!saturated) {
-        _syncI += kSyncI * drift * dt;
-        if (_syncI >  (float)maxSync) _syncI =  (float)maxSync;
-        if (_syncI < -(float)maxSync) _syncI = -(float)maxSync;
-      }
-      u = kSyncP * drift + _syncI;
-      if (u >  (float)maxSync) u =  (float)maxSync;
-      if (u < -(float)maxSync) u = -(float)maxSync;
-      _syncCorr = u;
-    }
 
     // The heading PID: runs the error fed in this tick into _headingCorr.
     void holdHeading(float dt) {

@@ -28,9 +28,12 @@
 //   s      0 strafing RIGHT, 1 pause, 2 strafing LEFT, 3 pause, 4 finished
 //   hdg    heading since power-on
 //   err    degrees the robot has turned since this strafe began - the number a
-//          strafe is judged by. The heading PID should push it back to zero.
-//   corr   the PWM differential the PID is applying, out of +-40
-//   pwm    motor1..motor4. All four drive in a strafe; 0 while braked.
+//          strafe is judged by. Calibrate pwms[] (Hardware.cpp) until it stays
+//          near zero on its own; the heading trim only tidies what is left.
+//   corr   the trim in force, PWM, out of +-strafeHeadingMax. Near 0 once the
+//          pwms are right; pinned at the cap means the pwms are off.
+//   pwm    motor1..motor4: pwms[] plus the trim. All four drive in a strafe;
+//          0 while braked.
 //   mm/s   each motor's speed, signed by its encoder. Going right, m1 and m3
 //          run one way and m2 and m4 the other (F B F B); going left the signs
 //          swap. A wheel far from the other three is the one to look at.
@@ -75,7 +78,7 @@ static void report() {
   Serial.print(F("    wheels "));
   for (uint8_t i = 0; i < 4; i++) {
     Serial.print(F("m")); Serial.print(i + 1); Serial.print(F("="));
-    Serial.print(move.regulator.progress(i)); Serial.print(F(" "));
+    Serial.print(move.wheelTravelCounts(i)); Serial.print(F(" "));
   }
   Serial.print(F("  heading off by "));
   Serial.print(headingError(), 2);
@@ -83,11 +86,12 @@ static void report() {
 }
 
 // Printed once the robot has settled after a strafe: how far past the target
-// the front wheels ended up, and whether any encoder skipped transitions
-// (a rising error count means missed edges, i.e. under-counting). The
-// regulator still holds the target of the strafe that just ended.
+// the trusted wheels ended up (the travel the finish was judged on), and
+// whether any encoder skipped transitions (a rising error count means missed
+// edges, i.e. under-counting). The regulator still holds the target of the
+// strafe that just ended.
 static void settled() {
-  long over = move.frontTravelCounts() - move.regulator.target();
+  long over = move.travelCounts() - move.regulator.target();
   Serial.print(F("    overshoot "));
   Serial.print(over / move.regulator.countsPerMM, 1);
   Serial.print(F(" mm   encoder errors "));
@@ -116,18 +120,17 @@ void setup() {
     Serial.println(F("BNO08x NOT found - running WITHOUT heading hold"));
   }
 
-  Serial.print(F("strafe trims pwms "));
+  Serial.print(F("strafe pwms "));
   for (uint8_t i = 0; i < 4; i++) { Serial.print(pwms[i]); Serial.print(' '); }
-  Serial.println(F(" (only their differences count)"));
+  Serial.println(F(" (the PWM each wheel runs at)"));
+  Serial.print(F("trusted encoders "));
+  for (uint8_t i = 0; i < 4; i++) { Serial.print(move.trusted[i] ? F("m") : F("-")); Serial.print(i + 1); Serial.print(' '); }
+  Serial.println(F(" (a move ends when the second one reaches the count)"));
   Serial.print(F("counts/mm "));   Serial.println(move.regulator.countsPerMM, 3);
-  Serial.print(F("ramp start "));  Serial.print(move.regulator.rampStartPWM);
-  Serial.print(F("   cruise "));   Serial.print(move.regulator.cruisePWM);
-  Serial.print(F("   min "));      Serial.print(move.regulator.minPWM);
-  Serial.print(F("   max "));      Serial.println(move.regulator.maxPWM);
-  Serial.print(F("heading gains P ")); Serial.print(move.regulator.kHeadingP, 1);
-  Serial.print(F(" I "));              Serial.print(move.regulator.kHeadingI, 1);
-  Serial.print(F(" D "));              Serial.print(move.regulator.kHeadingD, 2);
-  Serial.print(F("   max differential +-")); Serial.println(move.regulator.maxHeadingCorrection);
+  Serial.print(F("heading trim P ")); Serial.print(move.strafeHeadingP, 1);
+  Serial.print(F(" PWM/deg   cap +-"));  Serial.print(move.strafeHeadingMax);
+  Serial.print(F("   slew "));            Serial.print(move.strafeHeadingSlew, 0);
+  Serial.println(F(" PWM/s"));
 
   // Opens the Bluetooth port and queues the status block; loop() sends it.
   telemetryBegin(robotSide == LEFT ? "LEFT (wall)" : "RIGHT (ramp)", "strafe_test",
@@ -141,7 +144,7 @@ void loop() {
   headingUpdate();
 
   // At most one line per pass, and only when it fits the serial buffers.
-  telemetryUpdate(cycle + 1, state, move.wheelPWM, move.regulator.headingCorr());
+  telemetryUpdate(cycle + 1, state, move.wheelPWM, move.headingCorr());
 
   switch (state) {
     case 0:

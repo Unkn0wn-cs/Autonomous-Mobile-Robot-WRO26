@@ -735,9 +735,9 @@ switch (routine) {//------------------------------------------------------------
     switch(state){
       case 0:
         if(robotSide == RIGHT){
-          if(move.inner(30)) state++;
+          if(move.inner(130)) state++;
         } else{
-          if(move.inner(120)) state++;
+          if(move.inner(200)) state++;
         }
         break;
       case 1:
@@ -751,7 +751,7 @@ switch (routine) {//------------------------------------------------------------
         if(move.stopForMillis(mili)) state++;
         break;
       case 4:
-        if(move.forward(150)) state++;
+        if(move.forward(200)) state++;
         break;
       case 5:
         state++;
@@ -759,7 +759,7 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 6:
         if (robotSide == RIGHT){
-          if(move.forwardLeft(300)) state++;
+          if(move.forwardLeft(370)) state++;
         } else{
           if(move.forwardRight(250)) state++;
         }
@@ -769,7 +769,7 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 8:
         if (robotSide == RIGHT){
-          if(move.forwardq(lenght/3 + 220, true)){state++;}
+          if(move.forwardq(lenght/3 + 120, true)){state++;}
         } else {
           if(move.forwardq(lenght/2 + 60, false)){state++;}
         }
@@ -821,7 +821,7 @@ switch (routine) {//------------------------------------------------------------
           break;
         }
         if(robotSide == RIGHT){
-          if(move.inner(200)) state++;
+          if(move.inner(300)) state++;
         } else{
           if(move.inner(300)) state++;
         }
@@ -1007,9 +1007,9 @@ switch (routine) {//------------------------------------------------------------
         // second target is 30 - 20.
         enableDrivers();
         if(robotSide == RIGHT){
-          if(move.turnTo(-30, 30, true)) state++;
+          if(move.turnTo(-20, 30, true)) state++;
         } else {
-          if(move.turnTo( 30, 30, false)) state++;
+          if(move.turnTo( 20, 30, false)) state++;
         }
         break;
       case 17:

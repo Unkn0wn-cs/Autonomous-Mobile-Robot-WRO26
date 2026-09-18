@@ -72,7 +72,7 @@ void loop() {
   headingUpdate();
 
   // At most one line per pass, and only when it fits the serial buffers.
-  telemetryUpdate(routine, state, move.wheelPWM, move.regulator.headingCorr());
+  telemetryUpdate(routine, state, move.wheelPWM, move.headingCorr());
 
   // MUST BE LAST
   runRoutines();

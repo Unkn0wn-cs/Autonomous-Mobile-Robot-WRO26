@@ -17,61 +17,64 @@
 // ===========================================================================
 // LEFT - WALL
 // ===========================================================================
-  // int pwmf[4] = {243, 243, 243, 243};
-  // int pwms[4] = {240, 240, 240, 240};
-  // extern const long pulses = 800;  // encoder counts per wheel revolution
-  // side robotSide = LEFT;
-  // int slowRotorSpeed = 90;
-  // int fastRotorSpeed = 200;
-  // const int maxPWM           = 255;  // ceiling for every wheel
-  // const int minPWM           = 235;  // floor for every driven wheel and the decel loop
-  // const int rampStartPWM     = 235;  // where the accel ramp starts
-  // const int normalCruisePWM  = 250;  // every routine
-  // const int captureCruisePWM = 250;
-  // const float wallHugDeg     = 3.0f; // angle the wall moves hold toward the wall
-  // const int headingLostDeg   = 70;   // off north by this -> routine 8
-  // const int headingSquareDeg = 8;    // a turn stops inside this of its target
-  // const int headingTurnPWM   = 230;  // the open-loop spin of every turn
-  // int closedGate = 180;
-  // int openGate = 55;
-  // int lenght = 1100;
-  // // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
-  // extern const int ballZones[NUM_BALL_ZONES][4] = {
-  //   { 135,  20,  160,   0 },   // routine 0 - upper left
-  //   { 235,  25,  260,  10 },   // routine 1 - upper right
-  //   { 135,  40,  160,  20 },   // routine 2 - lower left
-  //   { 260,  55,  290,  25 }    // routine 3 - lower right
-  // };
-
-// ===========================================================================
-// RIGHT - RAMP
-// ===========================================================================
-  int pwmf[4] = {220, 243, 243, 220};
-  int pwms[4] = {200, 200, 200, 200};
-  extern const long pulses = 1350;  // encoder counts per wheel revolution
-  side robotSide = RIGHT;
-  int slowRotorSpeed = 120;
-  int fastRotorSpeed = 220;
-  int captureRotorSpeed = 78;
-  const int maxPWM           = 250;  // ceiling for every wheel
-  const int minPWM           = 190;  // floor for every driven wheel and the decel loop
-  const int rampStartPWM     = 210;  // where the accel ramp starts
-  const int normalCruisePWM  = 225;  // every routine
-  const int captureCruisePWM = 190;
+  int pwmf[4] = {243, 243, 243, 243};
+  int pwms[4] = {238, 236, 245, 245};  // the strafe PWM of each wheel, calibrated by hand
+  extern const bool trustedEncoders[4] = {true, true, true, false};  // encoder 4 dead
+  extern const long pulses = 800;  // encoder counts per wheel revolution
+  side robotSide = LEFT;
+  int slowRotorSpeed = 90;
+  int fastRotorSpeed = 200;
+  int captureRotorSpeed = 78;        // rotor while taking the purple ball in (routines 0/1)
+  const int maxPWM           = 255;  // ceiling for every wheel
+  const int minPWM           = 225;  // floor for every driven wheel and the decel loop
+  const int rampStartPWM     = 235;  // where the accel ramp starts
+  const int normalCruisePWM  = 250;  // every routine
+  const int captureCruisePWM = 250;
   const float wallHugDeg     = 3.0f; // angle the wall moves hold toward the wall
   const int headingLostDeg   = 70;   // off north by this -> routine 8
   const int headingSquareDeg = 8;    // a turn stops inside this of its target
   const int headingTurnPWM   = 230;  // the open-loop spin of every turn
-  int closedGate =116;
-  int openGate = 0;
-  int lenght = 680;
+  int closedGate = 180;
+  int openGate = 55;
+  int lenght = 1100;
   // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
   extern const int ballZones[NUM_BALL_ZONES][4] = {
-    { 142,  32,  160,  15 },   // routine 0 - upper left
-    { 245,  33,  260,  20 },   // routine 1 - upper right
-    { 143,  51,  170,  25 },   // routine 2 - lower left
-    { 271,  60,  290,  35 }    // routine 3 - lower right
+    { 135,  20,  160,   0 },   // routine 0 - upper left
+    { 235,  25,  260,  10 },   // routine 1 - upper right
+    { 135,  40,  160,  20 },   // routine 2 - lower left
+    { 260,  55,  290,  25 }    // routine 3 - lower right
   };
+
+// ===========================================================================
+// RIGHT - RAMP
+// ===========================================================================
+  // int pwmf[4] = {220, 243, 243, 220};
+  // int pwms[4] = {200, 200, 200, 200};  // the strafe PWM of each wheel, calibrated by hand
+  // extern const bool trustedEncoders[4] = {true, true, true, true};
+  // extern const long pulses = 1350;  // encoder counts per wheel revolution
+  // side robotSide = RIGHT;
+  // int slowRotorSpeed = 210;
+  // int fastRotorSpeed = 240;
+  // int captureRotorSpeed = 78;
+  // const int maxPWM           = 250;  // ceiling for every wheel
+  // const int minPWM           = 180;  // floor for every driven wheel and the decel loop
+  // const int rampStartPWM     = 210;  // where the accel ramp starts
+  // const int normalCruisePWM  = 225;  // every routine
+  // const int captureCruisePWM = 190;
+  // const float wallHugDeg     = 3.0f; // angle the wall moves hold toward the wall
+  // const int headingLostDeg   = 70;   // off north by this -> routine 8
+  // const int headingSquareDeg = 8;    // a turn stops inside this of its target
+  // const int headingTurnPWM   = 200;  // the open-loop spin of every turn
+  // int closedGate =116;
+  // int openGate = 0;
+  // int lenght = 680;
+  // // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
+  // extern const int ballZones[NUM_BALL_ZONES][4] = {
+  //   { 142,  32,  160,  15 },   // routine 0 - upper left
+  //   { 245,  33,  260,  20 },   // routine 1 - upper right
+  //   { 143,  51,  170,  25 },   // routine 2 - lower left
+  //   { 271,  60,  290,  35 }    // routine 3 - lower right
+  // };
 
 // ===========================================================================
 // Everything below is the same on both robots.
@@ -144,6 +147,9 @@ void initHardware() {
   // Which way move.inner() strafes on this robot; move.outer() is the other.
   move.innerIsLeft = (robotSide == RIGHT);
 
+  // Which encoders end a move and feed the speed profile (block above).
+  for (uint8_t i = 0; i < 4; i++) move.trusted[i] = trustedEncoders[i];
+
   // The movement layer reads heading through these hooks so lib/move stays
   // independent of the sensor. HEADING_SIGN is applied inside Sensors.cpp.
   move.setHeadingHooks(&regulatorHeadingError, &headingCaptureTarget, &turnHeadingNorth);
@@ -167,7 +173,8 @@ void initHardware() {
   // keep turning: the deceleration loop cannot go below it and a heading
   // correction that would push one pair under it is clipped there. A
   // correction that would push a wheel over maxPWM shifts the whole set down
-  // instead. The accel ramp runs from rampStartPWM up to the cruise.
+  // instead. The accel ramp runs from rampStartPWM up to the cruise. None of
+  // this applies to the strafes, which run on pwms[] (see the strafe trim).
   move.regulator.maxPWM       = maxPWM;
   move.regulator.minPWM       = minPWM;
   move.regulator.rampStartPWM = rampStartPWM;
@@ -236,15 +243,17 @@ void initHardware() {
   move.regulator.maxHeadingCorrection = 40;      // PWM, per wheel pair
   move.regulator.headingIntegralLimit = 12.0f;   // PWM
 
-  // ---- Strafe sync --------------------------------------------------------
-  // In a strafe the forward-driven pair and the backward-driven pair must run
-  // at the same speed or the robot drifts forward/back. PI on that drift
-  // (mean signed wheel speed, encoders), output taken from the faster pair
-  // and given to the slower one, capped at maxSync per wheel. Strafes and
-  // rotations only; the heading PID is untouched by it.
-  move.regulator.kSyncP  = 0.3f;    // PWM per mm/s of drift
-  move.regulator.kSyncI  = 1.5f;    // PWM per mm/s per second
-  move.regulator.maxSync = 20;      // PWM
+  // ---- Strafe trim --------------------------------------------------------
+  // The strafes run each wheel at its pwms[] value; this is the only thing
+  // added to those numbers. A proportional trim on the BNO08x error in the
+  // same F B B F sense as the heading PID: P PWM per degree, never more than
+  // the cap, and changing no faster than the slew - at most 15 PWM, reached
+  // no sooner than a quarter of a second, so it can tidy the heading but
+  // never yank a wheel. Start values; calibrate pwms[] first, with the trim
+  // reading near 0 on the phone, then leave the trim to absorb the rest.
+  move.strafeHeadingP    = 3.0f;    // PWM per degree
+  move.strafeHeadingMax  = 15;      // PWM
+  move.strafeHeadingSlew = 60.0f;   // PWM per second
 
   // ---- Timing -------------------------------------------------------------
   move.regulator.updateIntervalMs = 4;      // regulator tick, ms

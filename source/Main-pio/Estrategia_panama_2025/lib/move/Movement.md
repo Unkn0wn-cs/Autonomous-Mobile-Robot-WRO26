@@ -11,20 +11,22 @@ to change for which symptom. Strategy and the game are in
 
 ```
 encoders ──► distance travelled ──► phase of the move: accel / cruise / decel
-         │                        ──► move complete (front pair reaches the count)
+         │                        ──► move complete (second trusted wheel reaches the count)
          ├─► mean speed          ──► deceleration loop → common PWM
          └─► per-motor speed     ──► telemetry only
 BNO08x   ──► heading error       ──► PID → differential between the wheel pairs
 
-        pwm_i = common + trim_i + differential · ROT_i · dirSign_i
+        pwm_i = common + trim_i + differential · ROT_i · dirSign_i        (straights, diagonals, rotations)
+        pwm_i = pwms_i + trim · ROT_i · dirSign_i                        (strafes: calibrated PWM + a capped, slewed trim)
 ```
 
 Two sensors, two jobs, no overlap:
 
 - **Encoders** say how far and how fast. They time the acceleration and the
-  deceleration and end the move. They never steer.
+  deceleration and end the move. They never steer. Only the trusted ones
+  count (`trustedEncoders[]`, per robot): a dead encoder is simply left out.
 - **BNO08x** says which way the robot points. One PID on its heading error is
-  the only thing that keeps the robot straight.
+  the only thing that keeps the robot straight; in a strafe, one small trim.
 
 Everything in this file is the code in `lib/move/`, `src/Hardware.*` and the
 heading part of `src/Sensors.*`.
@@ -40,8 +42,8 @@ Four 60 mm 45° omni wheels on a 200mm (across) × 130mm (back to front) base, A
 
 ```
         FRONT
-   motor3   motor4      front pair: measure distance, decide when a move ends
-   motor2   motor1      rear pair:  speed measurement only
+   motor3   motor4      every trusted encoder measures distance and speed;
+   motor2   motor1      the second one to reach the count ends the move
         BACK
 ```
 
@@ -159,10 +161,16 @@ move has finished.
   `moveStartTime`.
 - **Every call** (`runRegulated`): assert the direction pattern, give the
   regulator each wheel's travel (|counts| since the move began), whether it is
-  driven, and its direction sign; feed it the fresh BNO08x error; take the four
-  PWMs it computes and write them to the motors.
-- **Completion** (`checkDoneWithTimeout`): either front encoder reaching the
-  target count ends the move and `stop()` brakes in the same pass. `moveTimeoutMs`
+  driven and trusted, and its direction sign; feed it the fresh BNO08x error;
+  take the four PWMs it computes and write them to the motors. The strafes
+  use `runStrafe` instead (below): the calibrated `pwms[]` plus a heading
+  trim, no regulator.
+- **Completion** (`checkDoneWithTimeout`): the move ends when the **second
+  trusted wheel it drives** reaches the target count — one noisy encoder
+  cannot end it early, one dead encoder cannot hold it — and `stop()` brakes
+  in the same pass. With a single trusted driven wheel, that wheel decides.
+  `trusted[]` comes from `trustedEncoders[]` in the robot's block in
+  `Hardware.cpp` (a dead encoder is marked false there). `moveTimeoutMs`
   (4 s) is a hard cap on every counted primitive, rotations included — a move
   pressed against a wall or with a blocked wheel is stopped and reported done.
 
@@ -173,13 +181,13 @@ microswitch advanced `state`), the next call re-arms from the current counts.
 
 | Primitive | Mode | Heading hold | Completion |
 |---|---|---|---|
-| `forward`, `backward` | Hold | yes | front encoder ≥ target, or timeout |
+| `forward`, `backward` | Hold | yes | second trusted wheel ≥ target, or timeout |
 | `forwardRegulated` | Hold | yes | returns 1 at target, 2 at 14/22 of it |
 | `forwardp`, `backwardp`, `forwardq` | Hold, leaning `wallHugDeg` toward the wall | yes | as above (`forwardp` also returns 2 at 14/22) |
-| `left`, `right` (and `inner`, `outer`) | BurstHold, with the strafe sync | yes | front encoder ≥ target, or timeout |
-| `forwardLeft`, `forwardRight`, `backwardLeft`, `backwardRight` | BurstHold | yes | front encoder ≥ target, or timeout |
+| `left`, `right` (and `inner`, `outer`) | none — calibrated `pwms[]` plus the heading trim | trim only | second trusted wheel ≥ target, or timeout |
+| `forwardLeft`, `forwardRight`, `backwardLeft`, `backwardRight` | BurstHold | yes | second trusted wheel ≥ target, or timeout |
 | `turnTo` | none — open-loop spin at `turnPWM` watched on the sensor | – | within `turnDoneDeg` of the target angle from north, or timeout; falls back to `rotate()` without a heading |
-| `rotate` | Profile, with the strafe sync | no | front encoder ≥ target, or timeout |
+| `rotate` | Profile | no | second trusted wheel ≥ target, or timeout |
 | `rotateCW`, `rotateCCW` | none | no | open-loop at a fixed PWM; the caller stops it |
 | `stop` | – | – | brakes all four motors and holds them |
 | `stopForMillis` | – | – | brakes, returns true after the delay (one shared timer) |
@@ -202,14 +210,38 @@ While the hook returns NAN (sensor unavailable) it runs `rotate(fallbackMM,
 fallbackSide)` instead. The routines write the angles next to the call; the
 sign follows the sensor (RIGHT's corner turn is `+90`, LEFT's `-90`).
 
+### Strafes: calibrated PWM plus a heading trim
+
+`left()` / `right()` (and so `inner()` / `outer()`) do not go through the
+regulator. Each wheel runs at its `pwms[]` value for the whole move — no ramp,
+no deceleration, brake at the count — exactly as before the speed profile
+existed. The four numbers are calibrated by hand with `strafe_test` until the
+robot strafes straight on its own: they are what runs.
+
+On top sits one small trim from the BNO08x error, in the same `F B B F` sense
+the heading PID uses (so it lowers a positive error):
+
+| Number | Start value | Meaning |
+|---|---|---|
+| `strafeHeadingP` | 3 PWM per degree | how hard the trim leans on the error |
+| `strafeHeadingMax` | ±15 PWM | the most it may ever add to or take from a wheel |
+| `strafeHeadingSlew` | 60 PWM per second | the fastest it may change — a step in the error becomes a ramp on the wheels |
+
+It starts at 0 on every strafe. The cap and the slew are what keep it from
+ever doing anything drastic: it can tidy the heading over a strafe, it cannot
+yank a wheel. Keep `pwms[]` under 255 so it has room in both directions. On the
+phone the `corr` column is this trim: near 0 once the pwms are right, pinned at
+the cap when they are not. Set in `initHardware()`.
+
 ### Trims
 
-`pwmf[]` / `pwms[]` are not sent to the motors as absolute values. `Move` turns
-the four numbers a motion asks for into trims: `trim[i] = n[i] − mean(n)`. The
-regulator adds each trim to the common PWM. `{220, 243, 243, 220}` therefore
-means "wheels 2 and 3 run 23 counts above wheels 1 and 4"; raising all four by
-the same amount changes nothing. They are the static per-motor balance; the
-BNO08x PID does the dynamic part.
+`pwmf[]` (and, for the diagonals and rotations, `pwms[]`) are not sent to the
+motors as absolute values. `Move` turns the four numbers a motion asks for into
+trims: `trim[i] = n[i] − mean(n)`. The regulator adds each trim to the common
+PWM. `{220, 243, 243, 220}` therefore means "wheels 2 and 3 run 23 counts above
+wheels 1 and 4"; raising all four by the same amount changes nothing. They are
+the static per-motor balance; the BNO08x PID does the dynamic part. Only the
+strafes read `pwms[]` as absolute PWM (above).
 
 ### Braking
 
@@ -220,8 +252,10 @@ is the PWM line, so `stop()` and `stopForMillis()` set `RELEASE` **and** PWM 255
 a full-duty brake, held until the next move sets new directions. A stationary
 braked motor draws no current.
 
-`frontTravelCounts()` is the front-wheel travel since the move began; after a
-move it is target + overshoot, which `square_test` prints.
+`travelCounts()` is the travel the finish is judged on — the second-highest
+among the trusted wheels the move drives; after a move it is target +
+overshoot, which `square_test` and `strafe_test` print. `wheelTravelCounts(i)`
+is one wheel's own travel.
 
 ---
 
@@ -235,14 +269,16 @@ public members, set in `initHardware()` (`src/Hardware.cpp`).
 | Mode | Speed profile | Heading PID | Used by |
 |---|---|---|---|
 | Burst | no — straight to `cruisePWM`, brake at the target | no | any move shorter than 30 mm (wall nudges) |
-| BurstHold | no — straight to `cruisePWM`, brake at the target | yes | the diagonals and the strafes, whatever their length |
+| BurstHold | no — straight to `cruisePWM`, brake at the target | yes | the diagonals, whatever their length |
 | Profile | yes | no | encoder rotations (the `turnTo` fallback) |
 | Hold | yes | yes | forward / backward / forwardRegulated, and the wall-hugging straights with a `wallHugDeg` lean |
 
 ### Speed profile (encoders)
 
-Distance is the mean travel of the driven wheels; speed is its rate, filtered
-0.75/0.25. Three phases:
+Distance is the mean travel of the driven wheels whose encoder is trusted
+(`trusted[]`, from the robot's block in `Hardware.cpp`; every driven wheel if
+the motion drives no trusted one), so a dead encoder cannot drag it to a
+fraction of the truth; speed is its rate, filtered 0.75/0.25. Three phases:
 
 | Phase | When | Common PWM |
 |---|---|---|
@@ -307,8 +343,9 @@ speed, so it is the same on either robot. The robot arrives at creep speed and
 
 ### Heading PID (BNO08x)
 
-In `Hold` mode only. The error comes from `Sensors.cpp`: degrees from the
-heading captured when the move began, −180..+180, sign convention below.
+In `Hold` and `BurstHold` modes. The error comes from `Sensors.cpp`: degrees
+from the heading captured when the move began, −180..+180, sign convention
+below. (The strafes have their own, much smaller trim — §4.)
 
 | Term | Value | Notes |
 |---|---|---|
@@ -320,44 +357,31 @@ heading captured when the move began, −180..+180, sign convention below.
 A jump of more than 30° between two ticks is a sensor re-reference (reset, or a
 stale read returning), not the robot turning: I and D restart from there.
 
-### Strafe sync (encoders)
+### Trusted encoders
 
-The one place the encoders steer. In a strafe the two wheels driven forward and
-the two driven backward must run at the same speed: their forward components
-cancel and only the sideways motion is left. When one pair is faster — one
-motor weaker, or the motors weaker in reverse — the robot drifts forward or
-back, and the heading PID cannot see that (it is not a rotation). The signed
-sum of the four wheel speeds *is* that drift, so a PI drives it to zero:
-
-| Term | Value | Notes |
-|---|---|---|
-| Drift | mean of `dirSign_i · speed_i`, mm/s | forward positive; per-wheel speeds filtered 0.75/0.25 |
-| P | `kSyncP` 0.3 PWM per mm/s | |
-| I | `kSyncI` 1.5 PWM per mm/s per second | frozen while saturated |
-| Output | ±`maxSync` 20 PWM | taken from the forward-driven wheels, given to the backward-driven ones |
-
-It runs only when every wheel is driven and the commanded directions sum to
-zero — strafes and encoder rotations — and is off for straights and diagonals,
-whose forward components are meant not to cancel. Applying `−sync · dirSign_i`
-to every wheel changes the forward velocity alone: the heading and the strafe
-speed are untouched.
+`trustedEncoders[]` in the robot's block of `Hardware.cpp` says which of the
+four encoders to believe (the wall robot's encoder 4 is dead and marked
+false). A wheel marked false is left out of the profile mean above and never
+ends a move (§4, completion). Everything the encoders feed therefore survives
+one dead encoder without changing behaviour; the heading never depended on
+them.
 
 ### From differential to wheels
 
 ```
-pwm_i = common + trim_i + differential · ROT_i · dirSign_i − sync · dirSign_i     ROT = {+1, −1, −1, +1}
+pwm_i = common + trim_i + differential · ROT_i · dirSign_i     ROT = {+1, −1, −1, +1}
 ```
 
 `ROT` puts wheels 1 and 4 against 2 and 3 — the `F B B F` rotation pattern.
 `dirSign_i` is +1 for a wheel commanded forward, −1 backward, 0 released, so the
-same differential turns the robot the same way whether it is driving forward,
-backward or strafing.
+same differential turns the robot the same way whether it is driving forward
+or backward (the strafe trim in §4 uses the same product).
 
-**The differential is never clipped.** The four PWMs are computed together; if
-the highest would exceed 255 the whole set is shifted down by the excess. A
-correction always arrives in full — the robot slows a little instead of losing
-steering. The floor is 0 in every phase: the 200 breakaway matters only for
-starting, which the accel ramp handles; a rolling wheel keeps rolling below it.
+**The differential is shifted, not clipped, down to `minPWM`.** The four PWMs
+are computed together; if the highest would exceed `maxPWM` the whole set is
+shifted down by the excess, so a correction arrives in full — the robot slows
+a little instead of losing steering — until the slow pair meets `minPWM`, the
+floor chosen for breakaway from standstill.
 
 Positive differential = the `F B B F` direction (the `rotateCCW()` pattern),
 and the heading sign convention makes the reading **decrease** under that
@@ -453,8 +477,9 @@ run re-references the heading mid-move and points at a supply problem.
 1. Everything in `generalStrategy.cpp` marked `KNOWN` is behaviour the robot
    is tuned around. Changing one means re-running the course.
 2. Distances in the routines are millimetres; the library converts them with
-   `regulator.countsPerMM` and measures completion on the front encoder pair.
-   Keep both, or the tuned numbers stop meaning what they mean.
+   `regulator.countsPerMM` and measures completion on the trusted encoders
+   (the second one to reach the count). Keep both, or the tuned numbers stop
+   meaning what they mean.
 3. Any new directional logic must branch on `robotSide`.
 4. Do not reorder the four `Encoders` declarations in `Sensors.cpp` or split
    them across files.

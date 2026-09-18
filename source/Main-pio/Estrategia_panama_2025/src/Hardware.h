@@ -53,14 +53,23 @@ extern side robotSide;       // which robot this build drives
 // Per robot values. Defined in Hardware.cpp, inside the active block.
 // ---------------------------------------------------------------------------
 
-// Per-motor balance for forward/backward (pwmf) and for strafe/diagonal moves
-// (pwms). The regulator drives every wheel from its own cruisePWM (set in
-// initHardware()) and uses only the DIFFERENCES between these four numbers as
-// per-wheel trims: {220,243,243,220} means "wheels 2 and 3 need ~23 more than
-// wheels 1 and 4 to run straight". Raising all four by the same amount changes
-// nothing.
+// Per-motor balance. pwmf: forward/backward trims - the regulator drives
+// every wheel from its own cruisePWM (set in initHardware()) and uses only
+// the DIFFERENCES between these four numbers: {220,243,243,220} means
+// "wheels 2 and 3 need ~23 more than wheels 1 and 4 to run straight";
+// raising all four by the same amount changes nothing.
+// pwms: the PWM each wheel ACTUALLY RUNS AT in a strafe (left/right, inner/
+// outer) - calibrate them until the robot strafes straight; a small heading
+// trim (initHardware()) sits on top, so keep them under 255 to leave it room.
+// The diagonals and rotations use only their differences, as trims.
 extern int pwmf[4];
 extern int pwms[4];
+
+// Which encoders to believe, motor1..motor4. A wheel marked false neither
+// ends a move nor feeds the speed profile: a move ends when the SECOND
+// trusted wheel it drives reaches its count. Mark a dead encoder false here;
+// put it back after the repair.
+extern const bool trustedEncoders[4];
 
 extern const long pulses;    // encoder counts per wheel revolution
 extern int slowRotorSpeed;   // rotor PWM used by enableSlowDrivers()
@@ -151,8 +160,8 @@ extern const int headingTurnPWM;
 // Layout seen from above, front of the robot pointing up:
 //
 //         FRONT
-//    motor3   motor4     <- front pair, their encoders measure distance
-//    motor2   motor1     <- rear pair, speed measurement only
+//    motor3   motor4     every trusted encoder (trustedEncoders above) measures
+//    motor2   motor1     distance; the second to reach the count ends a move
 //         BACK
 //
 // The encoder on each motor is in Sensors.h.

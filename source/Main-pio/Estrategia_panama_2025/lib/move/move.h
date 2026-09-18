@@ -12,24 +12,29 @@
 // Every distance-counted primitive below takes its distance in MILLIMETRES
 // (wheel travel, so for rotate() the arc each wheel rolls) and is
 // NON-BLOCKING: call it every pass of loop() and it returns true once, when
-// the move has finished. It drives the motors through WheelRegulator: the
-// encoders shape the speed over the move, the BNO08x heading PID keeps it
-// straight (see WheelRegulator.h).
+// the move has finished. Straights, diagonals and encoder rotations drive
+// the motors through WheelRegulator: the encoders shape the speed over the
+// move, the BNO08x heading PID keeps it straight (see WheelRegulator.h). The
+// strafes do not: left()/right() run each wheel at its calibrated PWM with a
+// small heading trim on top (see "Strafes" below).
 //
-// pwmFwd* / pwmStrafe* (pwmf[] / pwms[] in Hardware.h) are used as per-wheel
-// TRIMS: the regulator drives every wheel from a common PWM plus this wheel's
-// difference from the mean of the four.
+// pwmFwd* (pwmf[] in Hardware.h) are per-wheel TRIMS: the regulator drives
+// every wheel from a common PWM plus this wheel's difference from the mean of
+// the four. pwmStrafe* (pwms[]) are the PWM each wheel actually runs at in a
+// strafe; the diagonals and rotations use only their differences as trims.
 //
-// Distance and completion are measured on the front encoders (motors 3 and 4):
-// a move ends when either front wheel reaches the target count, or after
-// moveTimeoutMs, whichever comes first. The regulator has already slowed the
-// robot to a creep over the last part of the move, and the motors are braked
-// the moment the count is reached.
+// Distance and completion are measured on the TRUSTED encoders (trusted[],
+// set in initHardware(); a dead encoder is marked false there): a move ends
+// when the second trusted driven wheel reaches the target count - so one
+// noisy encoder cannot end it early and one dead encoder cannot hold it - or
+// after moveTimeoutMs, whichever comes first. With a single trusted driven
+// wheel that wheel decides. The motors are braked the moment the count is
+// reached.
 //
 // This library knows nothing about which robot it is on. Everything robot
 // specific - the PWM band, the heading source, the encoder counts per
-// millimetre and which way inner()/outer() strafe - is handed to it by
-// initHardware() (src/Hardware.cpp).
+// millimetre, which encoders to trust and which way inner()/outer() strafe -
+// is handed to it by initHardware() (src/Hardware.cpp).
 
 #pragma once
 #include <AFMotor.h>
@@ -66,10 +71,28 @@ class Move {
     // can never grow into a turn. Set in initHardware().
     float wallHugDeg = 2.0f;
 
-    // PWM values for forward/backward
+    // Which encoders to believe, motor1..motor4. Set in initHardware() from
+    // the robot's block; a wheel marked false neither ends a move nor feeds
+    // the speed profile. Mark a dead encoder false, put it back after repair.
+    bool trusted[WheelRegulator::WHEEL_COUNT] = {true, true, true, true};
+
+    // PWM values for forward/backward (trims)
     int pwmFwd1, pwmFwd2, pwmFwd3, pwmFwd4;
-    // PWM values for left/right/diagonals
+    // PWM values for left/right (absolute) and the diagonals/rotations (trims)
     int pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4;
+
+    // ---- Strafes: the heading trim ---------------------------------------
+    // left()/right() run each wheel at its pwmStrafe value - the calibrated
+    // numbers are what runs - plus a trim on the BNO08x error that keeps the
+    // robot aiming forward: strafeHeadingP PWM per degree, never more than
+    // strafeHeadingMax, and moving no faster than strafeHeadingSlew PWM per
+    // second, so a jump in the error becomes a ramp on the wheels and the
+    // trim can never yank one. Starts from 0 on every strafe. Set in
+    // initHardware(); keep pwms[] under 255 so the trim has room both ways.
+    float strafeHeadingP    = 0.0f;
+    int   strafeHeadingMax  = 0;
+    float strafeHeadingSlew = 0.0f;
+    float strafeCorr        = 0.0f;   // the trim in force, PWM (telemetry)
 
     // Speed profile and heading hold. Its parameters are set in
     // initHardware() (e.g. move.regulator.cruisePWM = 232).
@@ -81,16 +104,15 @@ class Move {
     // nothing in here reads it back.
     int wheelPWM[WheelRegulator::WHEEL_COUNT] = {0, 0, 0, 0};
 
-    // enc1..enc4 belong to motor1..motor4. Distance and completion come from
-    // the front pair (motors 3 and 4); all four feed the mean speed.
+    // enc1..enc4 belong to motor1..motor4. Distance, completion and the mean
+    // speed come from the trusted ones.
     Move(AF_DCMotor& m1, AF_DCMotor& m2, AF_DCMotor& m3, AF_DCMotor& m4,
          Encoders& enc1, Encoders& enc2, Encoders& enc3, Encoders& enc4,
          int fwdPWM1 = 255, int fwdPWM2 = 255, int fwdPWM3 = 255, int fwdPWM4 = 255,
          int strafePWM1 = 255, int strafePWM2 = 255, int strafePWM3 = 255, int strafePWM4 = 255)
       : pwmFwd1(fwdPWM1), pwmFwd2(fwdPWM2), pwmFwd3(fwdPWM3), pwmFwd4(fwdPWM4),
         pwmStrafe1(strafePWM1), pwmStrafe2(strafePWM2), pwmStrafe3(strafePWM3), pwmStrafe4(strafePWM4),
-        motor1(m1), motor2(m2), motor3(m3), motor4(m4),
-        encoderLeft(enc3), encoderRight(enc4) {
+        motor1(m1), motor2(m2), motor3(m3), motor4(m4) {
       encoders[0] = &enc1;
       encoders[1] = &enc2;
       encoders[2] = &enc3;
@@ -140,12 +162,12 @@ class Move {
     void startMove(long targetPulses = 0,
                    WheelRegulator::Mode mode = WheelRegulator::Hold,
                    WheelRegulator::EndSpec end = WheelRegulator::EndSpec()) {
-      startLeft = encoderLeft.getEncoderCount();
-      startRight = encoderRight.getEncoderCount();
       for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
         wheelStart[i] = encoders[i] ? encoders[i]->getEncoderCount() : 0;
       }
       regulator.begin(targetPulses, mode, end);
+      strafeCorr = 0.0f;
+      strafing = false;
       moving = true;
     }
 
@@ -219,12 +241,7 @@ class Move {
     }
 
     // ---- Free translations -----------------------------------------------
-    // forward/backward: speed profile + heading hold. left/right: BurstHold,
-    // cruise for the whole move with the heading held - a strafe needs more
-    // PWM to break away than a straight, and the profile's low end (the ramp
-    // start, the decel creep at minPWM) is where it stalls and jerks. The
-    // regulator's strafe sync (encoders) keeps the two wheel pairs matched so
-    // the move does not drift forward or back.
+    // forward/backward: speed profile + heading hold through the regulator.
 
     bool forward(int millimetres) {
       long pulses = toCounts(millimetres);
@@ -240,17 +257,23 @@ class Move {
       return checkDoneWithTimeout(pulses);
     }
 
+    // ---- Strafes ---------------------------------------------------------
+    // Each wheel at its calibrated pwmStrafe value for the whole move, plus
+    // the heading trim described at the top of the class; no speed profile,
+    // braked at the count. The regulator is armed (start counts, timeout,
+    // heading capture) but never consulted.
+
     bool left(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_LEFT, WheelRegulator::BurstHold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-      runRegulated(BACKWARD, FORWARD, BACKWARD, FORWARD);
+      armMotion(MOTION_LEFT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      runStrafe(BACKWARD, FORWARD, BACKWARD, FORWARD);
       return checkDoneWithTimeout(pulses);
     }
 
     bool right(int millimetres) {
       long pulses = toCounts(millimetres);
-      armMotion(MOTION_RIGHT, WheelRegulator::BurstHold, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
-      runRegulated(FORWARD, BACKWARD, FORWARD, BACKWARD);
+      armMotion(MOTION_RIGHT, WheelRegulator::Burst, pulses, pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4);
+      runStrafe(FORWARD, BACKWARD, FORWARD, BACKWARD);
       return checkDoneWithTimeout(pulses);
     }
 
@@ -410,23 +433,35 @@ class Move {
       }
     }
 
-    // Front-encoder travel since the current or last move began, in counts:
-    // the larger of the two front wheels, the same measure completion uses.
-    // After a move has ended this is target + overshoot.
-    long frontTravelCounts() {
-      long deltaLeft = abs(encoderLeft.getEncoderCount() - startLeft);
-      long deltaRight = abs(encoderRight.getEncoderCount() - startRight);
-      return deltaLeft > deltaRight ? deltaLeft : deltaRight;
+    // Travel of one wheel since the current or last move began, in counts.
+    long wheelTravelCounts(uint8_t i) {
+      if (i >= WheelRegulator::WHEEL_COUNT || !encoders[i]) return 0;
+      long delta = encoders[i]->getEncoderCount() - wheelStart[i];
+      return delta < 0 ? -delta : delta;
+    }
+
+    // The travel the finish is judged on, in counts: the second-highest among
+    // the trusted wheels this move drives (the highest when only one). After
+    // a move has ended this is target + overshoot.
+    long travelCounts() {
+      long best = 0, second = 0; uint8_t n = 0;
+      for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
+        if (!trusted[i] || !activeDriven[i]) continue;
+        long t = wheelTravelCounts(i);
+        n++;
+        if (t > best) { second = best; best = t; }
+        else if (t > second) { second = t; }
+      }
+      return (n >= 2) ? second : best;
     }
 
     // ---- Completion ------------------------------------------------------
-    // Either front encoder reaching `pulses` ends the move. With far == false
-    // the motors are braked; with far == true they keep running (used for
-    // the "14/22 of the way" signal). moveTimeoutMs ends any move regardless.
+    // The move ends when two trusted driven wheels have reached `pulses` -
+    // the one such wheel, if there is only one - or at moveTimeoutMs. With
+    // far == false the motors are braked; with far == true they keep running
+    // (used for the "14/22 of the way" signal).
     bool checkDoneWithTimeout(long pulses, bool far = false) {
-      long deltaLeft = abs(encoderLeft.getEncoderCount() - startLeft);
-      long deltaRight = abs(encoderRight.getEncoderCount() - startRight);
-      if (deltaLeft >= pulses || deltaRight >= pulses) {
+      if (travelCounts() >= pulses) {
         if (!far){
           stop();
         }
@@ -439,24 +474,31 @@ class Move {
       return false;
     }
 
+    // The heading correction in force, PWM: the strafe trim while a strafe
+    // is the active motion, the regulator's differential otherwise. For the
+    // telemetry line.
+    float headingCorr() const {
+      return (activeMotion == MOTION_LEFT || activeMotion == MOTION_RIGHT)
+             ? strafeCorr : regulator.headingCorr();
+    }
+
   private:
     AF_DCMotor& motor1;
     AF_DCMotor& motor2;
     AF_DCMotor& motor3;
     AF_DCMotor& motor4;
-    Encoders& encoderLeft;  // Motor 3
-    Encoders& encoderRight; // Motor 4
 
-    long startLeft = 0;
-    long startRight = 0;
     bool moving = false;
     unsigned long moveStartTime = 0; // For movement timeout
+    bool strafing = false;           // runStrafe() has run at least once this move
+    unsigned long strafeLastMs = 0;  // last runStrafe() pass, for the trim's slew
     float turnTarget = NAN;          // turnTo() target in progress, NAN when none
 
     // One entry per motor, indexed motor1..motor4 as 0..3.
     Encoders* encoders[WheelRegulator::WHEEL_COUNT];
     long wheelStart[WheelRegulator::WHEEL_COUNT] = {0, 0, 0, 0};
     int trim[WheelRegulator::WHEEL_COUNT] = {0, 0, 0, 0};  // per-wheel PWM offset from the mean
+    bool activeDriven[WheelRegulator::WHEEL_COUNT] = {true, true, true, true};  // wheels this motion drives
 
     // Identifies the movement in progress, so a move abandoned half way
     // through (a microswitch advanced the state machine) cannot leak its start
@@ -572,9 +614,9 @@ class Move {
       for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
         // A released wheel is coasting: it is left out of the mean speed.
         driven[i] = (dirs[i] != RELEASE) && (encoders[i] != 0);
+        activeDriven[i] = driven[i];
 
-        long delta = encoders[i] ? (encoders[i]->getEncoderCount() - wheelStart[i]) : 0;
-        progress[i] = delta < 0 ? -delta : delta;
+        progress[i] = wheelTravelCounts(i);
 
         // Lets the regulator turn the heading differential into a rotation: a
         // wheel commanded backwards has its PWM reduced to push the robot the
@@ -585,7 +627,7 @@ class Move {
       // Fresh heading error every tick, shifted by the offset this move holds.
       regulator.headingErrorDeg = headingSource ? headingSource() + headingOffsetDeg : 0.0f;
 
-      regulator.update(driven, progress, dirSign);
+      regulator.update(driven, trusted, progress, dirSign);
 
       int pwm[WheelRegulator::WHEEL_COUNT];
       regulator.computePWM(trim, pwm);
@@ -595,5 +637,52 @@ class Move {
       for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
         if (dirs[i] == RELEASE) wheelPWM[i] = 0;
       }
+    }
+
+    // A strafe pass: the four motors in the requested directions at their
+    // calibrated pwmStrafe values, plus the heading trim. The trim follows
+    // strafeHeadingP * error, capped at strafeHeadingMax, but may only move
+    // strafeHeadingSlew PWM per second, so it ramps rather than jumps. It is
+    // applied in the F B B F sense the regulator uses (ROT * dirSign), which
+    // lowers a positive error. Nothing else touches the calibrated numbers.
+    void runStrafe(uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4) {
+      setMotors(d1, d2, d3, d4);
+
+      const uint8_t dirs[WheelRegulator::WHEEL_COUNT] = {d1, d2, d3, d4};
+      const int     base[WheelRegulator::WHEEL_COUNT] = {pwmStrafe1, pwmStrafe2, pwmStrafe3, pwmStrafe4};
+      static const int8_t ROT[WheelRegulator::WHEEL_COUNT] = {1, -1, -1, 1};
+      for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
+        activeDriven[i] = (dirs[i] != RELEASE) && (encoders[i] != 0);
+      }
+
+      // Where the trim wants to be, from the heading error.
+      float error  = headingSource ? headingSource() : 0.0f;
+      float wanted = strafeHeadingP * error;
+      if (wanted >  (float)strafeHeadingMax) wanted =  (float)strafeHeadingMax;
+      if (wanted < -(float)strafeHeadingMax) wanted = -(float)strafeHeadingMax;
+
+      // Move toward it no faster than the slew allows. The first pass of a
+      // strafe (strafeCorr just zeroed by startMove) only records the time.
+      unsigned long now = millis();
+      if (!strafing) {
+        strafing = true;
+      } else {
+        float step = strafeHeadingSlew * (float)(now - strafeLastMs) * 0.001f;
+        if (wanted > strafeCorr + step)      strafeCorr += step;
+        else if (wanted < strafeCorr - step) strafeCorr -= step;
+        else                                 strafeCorr = wanted;
+      }
+      strafeLastMs = now;
+
+      int pwm[WheelRegulator::WHEEL_COUNT];
+      for (uint8_t i = 0; i < WheelRegulator::WHEEL_COUNT; i++) {
+        int8_t dirSign = (dirs[i] == FORWARD) ? 1 : ((dirs[i] == BACKWARD) ? -1 : 0);
+        float u = (float)base[i] + strafeCorr * (float)ROT[i] * (float)dirSign;
+        int p = (int)(u + (u >= 0.0f ? 0.5f : -0.5f));
+        if (p > 255) p = 255;
+        if (p < 0)   p = 0;
+        pwm[i] = p;
+      }
+      setSpeeds(pwm[0], pwm[1], pwm[2], pwm[3]);
     }
 };

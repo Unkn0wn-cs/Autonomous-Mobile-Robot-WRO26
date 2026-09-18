@@ -73,7 +73,7 @@ enum rlane {
   INNER
 };
 
-const int mili = 250;     // standard pause between moves, in milliseconds
+const int mili = 400;     // standard pause between moves, in milliseconds
 
 // ---------------------------------------------------------------------------
 // State machine

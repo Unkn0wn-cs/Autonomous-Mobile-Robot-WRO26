@@ -34,10 +34,10 @@
 // Do not reorder them, and do not split them across files.
 // ---------------------------------------------------------------------------
 
-extern Encoders encoderLeft;       // A15, A14  motor3, front left  - measures distance
-extern Encoders encoderRight;      // A13, A12  motor4, front right - measures distance
-extern Encoders encoderRearRight;  // A11, A10  motor1, rear right  - speed only
-extern Encoders encoderRearLeft;   // A9,  A8   motor2, rear left   - speed only
+extern Encoders encoderLeft;       // A15, A14  motor3, front left
+extern Encoders encoderRight;      // A13, A12  motor4, front right
+extern Encoders encoderRearRight;  // A11, A10  motor1, rear right
+extern Encoders encoderRearLeft;   // A9,  A8   motor2, rear left
 
 // ---------------------------------------------------------------------------
 // Heading - BNO08x.
