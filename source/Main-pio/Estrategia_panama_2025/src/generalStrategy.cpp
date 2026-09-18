@@ -485,13 +485,24 @@ switch (routine) {//------------------------------------------------------------
         break;
       case 5:
         enableDrivers();
-        if(move.forward(430)) state++;
+        if (robotSide == RIGHT){
+          if(move.forward(390)) state++;
+        } else{
+          if(move.forward(500)) state++;
+        }
         break;
       case 6:
-        if(move.stopForMillis(700)) state++;
-        break;
+        if(robotSide == LEFT){
+          if(move.forward(250)) state++;
+        } else {state++;}
+        myservo.write(closedGate);
+
+      break;
       case 7:
         myservo.write(closedGate);
+        if(move.stopForMillis(700)) state++;
+        break;
+      case 8:
         routine = 6; state = 0;
         if (robotSide == RIGHT){
           lane = OUTER;
@@ -504,7 +515,7 @@ switch (routine) {//------------------------------------------------------------
         if(robotSide == RIGHT){
           if(move.right(250)) state++;
         } else{
-          if(move.right(450)) state++;
+          if(move.right(285)) state++;
         }
         break;
       case 1:
@@ -526,15 +537,24 @@ switch (routine) {//------------------------------------------------------------
         if(move.stopForMillis(100)) state++;
         break;
       case 6:
-        myservo.write(openGate);
         enableDrivers();
-        if(move.forward(430)) state++;
+        if (robotSide == RIGHT){
+          if(move.forward(390)) state++;
+        } else{
+          if(move.forward(500)) state++;
+        }        
         break;
       case 7:
-        if(move.stopForMillis(700)) state++;
+        if(robotSide == LEFT){
+          if(move.forward(250)) state++;
+        } else {state++;}
+        myservo.write(closedGate);
         break;
       case 8:
-        myservo.write(closedGate);
+      myservo.write(closedGate);
+        if(move.stopForMillis(700)) state++;
+        break;
+      case 9:
         routine = 6; state = 0;
         lane = MIDDLE;
       }
@@ -549,7 +569,11 @@ switch (routine) {//------------------------------------------------------------
         if(move.stopForMillis(mili)) state++;
         break;
       case 2:
-        if(move.forward(650)) state++;
+        if (robotSide == RIGHT){
+          if(move.forward(650)) state++;
+        } else{
+          if(move.forward(550)) state++;
+        }
         break;
       case 3:
         state++;
@@ -572,7 +596,7 @@ switch (routine) {//------------------------------------------------------------
         if(robotSide == RIGHT){
           if(move.right(250)) state++;
         } else{
-          if(move.right(450)) state++;
+          if(move.right(285)) state++;
         }
         break;
       case 1:
@@ -735,9 +759,9 @@ switch (routine) {//------------------------------------------------------------
     switch(state){
       case 0:
         if(robotSide == RIGHT){
-          if(move.inner(130)) state++;
+          if(move.inner(70)) state++;
         } else{
-          if(move.inner(200)) state++;
+          if(move.inner(90)) state++;
         }
         break;
       case 1:
@@ -761,7 +785,7 @@ switch (routine) {//------------------------------------------------------------
         if (robotSide == RIGHT){
           if(move.forwardLeft(370)) state++;
         } else{
-          if(move.forwardRight(250)) state++;
+          if(move.forwardRight(100)) state++;
         }
         break;
       case 7:
@@ -821,9 +845,9 @@ switch (routine) {//------------------------------------------------------------
           break;
         }
         if(robotSide == RIGHT){
-          if(move.inner(300)) state++;
+          if(move.inner(200)) state++;
         } else{
-          if(move.inner(300)) state++;
+          if(move.inner(250)) state++;
         }
         break;
       case 5:

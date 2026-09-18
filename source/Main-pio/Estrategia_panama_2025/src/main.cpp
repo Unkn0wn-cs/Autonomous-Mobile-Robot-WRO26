@@ -27,6 +27,7 @@
 #include "Strategy.h"
 
 void setup() {
+  analogWrite(enable34, 255);  // rotor on 
 
   Serial.begin(115200);
 

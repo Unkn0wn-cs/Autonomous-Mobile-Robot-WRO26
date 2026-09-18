@@ -18,19 +18,19 @@
 // LEFT - WALL
 // ===========================================================================
   int pwmf[4] = {243, 243, 243, 243};
-  int pwms[4] = {238, 236, 245, 245};  // the strafe PWM of each wheel, calibrated by hand
+  int pwms[4] = {243, 243, 243, 243};  // the strafe PWM of each wheel, calibrated by hand
   extern const bool trustedEncoders[4] = {true, true, true, false};  // encoder 4 dead
-  extern const long pulses = 800;  // encoder counts per wheel revolution
+  extern const long pulses = 1100;  // encoder counts per wheel revolution
   side robotSide = LEFT;
-  int slowRotorSpeed = 90;
+  int slowRotorSpeed = 120;
   int fastRotorSpeed = 200;
-  int captureRotorSpeed = 78;        // rotor while taking the purple ball in (routines 0/1)
+  int captureRotorSpeed = 135;        // rotor while taking the purple ball in (routines 0/1)
   const int maxPWM           = 255;  // ceiling for every wheel
   const int minPWM           = 225;  // floor for every driven wheel and the decel loop
   const int rampStartPWM     = 235;  // where the accel ramp starts
   const int normalCruisePWM  = 250;  // every routine
   const int captureCruisePWM = 250;
-  const float wallHugDeg     = 3.0f; // angle the wall moves hold toward the wall
+  const float wallHugDeg     = 4.5f; // angle the wall moves hold toward the wall
   const int headingLostDeg   = 70;   // off north by this -> routine 8
   const int headingSquareDeg = 8;    // a turn stops inside this of its target
   const int headingTurnPWM   = 230;  // the open-loop spin of every turn
@@ -49,13 +49,13 @@
 // RIGHT - RAMP
 // ===========================================================================
   // int pwmf[4] = {220, 243, 243, 220};
-  // int pwms[4] = {200, 200, 200, 200};  // the strafe PWM of each wheel, calibrated by hand
+  // int pwms[4] = {200, 200, 200, 220};  // the strafe PWM of each wheel, calibrated by hand
   // extern const bool trustedEncoders[4] = {true, true, true, true};
   // extern const long pulses = 1350;  // encoder counts per wheel revolution
   // side robotSide = RIGHT;
   // int slowRotorSpeed = 210;
   // int fastRotorSpeed = 240;
-  // int captureRotorSpeed = 78;
+  // int captureRotorSpeed = 90;
   // const int maxPWM           = 250;  // ceiling for every wheel
   // const int minPWM           = 180;  // floor for every driven wheel and the decel loop
   // const int rampStartPWM     = 210;  // where the accel ramp starts
@@ -70,10 +70,10 @@
   // int lenght = 680;
   // // Purple ball zones {xA, yA, xB, yB}, Pixy pixels. Format in Hardware.h.
   // extern const int ballZones[NUM_BALL_ZONES][4] = {
-  //   { 142,  32,  160,  15 },   // routine 0 - upper left
-  //   { 245,  33,  260,  20 },   // routine 1 - upper right
-  //   { 143,  51,  170,  25 },   // routine 2 - lower left
-  //   { 271,  60,  290,  35 }    // routine 3 - lower right
+  //   { 135,  5,  160,  25 },   // routine 0 - upper left
+  //   { 235,  20,  255,  35 },   // routine 1 - upper right
+  //   { 135,  23,  160,  47 },   // routine 2 - lower left
+  //   { 253,  34,  276,  56 }    // routine 3 - lower right
   // };
 
 // ===========================================================================
